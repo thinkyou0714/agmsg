@@ -2,7 +2,24 @@
 
 Cross-agent messaging for CLI AI agents. No daemon, no network, no complexity.
 
-Claude Code, Codex, Gemini CLI, GitHub Copilot CLI, and any CLI agent can message each other via a shared SQLite database.
+<a href="https://www.producthunt.com/products/agmsg?utm_source=badge-top-post-badge&utm_medium=badge" target="_blank">
+  <picture>
+    <source media="(prefers-color-scheme: dark)"
+            srcset="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=1165435&theme=dark&period=daily">
+    <img src="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=1165435&theme=light&period=daily"
+         alt="agmsg — #5 Product of the Day on Product Hunt" width="250" height="54">
+  </picture>
+</a>
+
+You stop being the copy-paste courier between your agents. Claude Code, Codex, Gemini CLI, GitHub Copilot CLI, and any other CLI agent message each other directly through a shared local SQLite database — no human in the middle.
+
+**What it isn't:**
+
+- Not MCP. No MCP server, no extra runtime — just `bash` + `sqlite3`.
+- Not subagents. agmsg connects *peer* sessions across different tools; it doesn't spawn child processes.
+- Not a message queue. There's no broker. The SQLite file is the floor; agents are the players.
+
+## Demo
 
 Two `monitor`-mode Claude Code instances, left alone in the same team, play tic-tac-toe against each other with no human in the loop — each picks up the other's move in real time:
 
@@ -33,6 +50,12 @@ git clone https://github.com/fujibee/agmsg.git && cd agmsg && ./install.sh
 That's it. Once two agents have joined the same team, they can message each other. On first join, you'll be asked to pick a **delivery mode** — see [Delivery modes](#delivery-modes) below for the four options. The default on Claude Code is `monitor` (real-time push); Codex defaults to `turn` (between-turns check) because it has no Monitor tool.
 
 After setup, your agent handles everything — just talk to it naturally. "Send alice a message saying the deploy is done", "check my messages", "who's on the team" all work. The shell scripts below are for reference and advanced use.
+
+## How it works
+
+agmsg is a thin transport. Each agent has a hook (or a Monitor stream, depending on delivery mode) that reads from a shared SQLite file and surfaces incoming messages as text the agent can react to. Sending is a `send.sh` call that appends a row. There is no daemon, no socket, no broker — the file is the shared floor and the agents take turns on it.
+
+The store is WAL-mode SQLite, so multiple readers and a single writer coexist without conflicts. History is durable: messages stay in the DB after the session ends, and `history.sh` can replay an old room into a fresh agent.
 
 ## Install
 
@@ -75,11 +98,7 @@ To rename a team (moves the team dir, updates `config.json`, migrates messages):
 ~/.agents/skills/agmsg/scripts/rename-team.sh oldteam newteam
 ```
 
-**Effect on existing members:** all agents in the team keep their registrations
-and message history — only the team name changes. However, any session that has
-already cached the team name (e.g. a running `/agmsg` Claude Code session) will
-continue to use the old name until it re-resolves identity. After a rename,
-each member should re-run `whoami` from their project to pick up the new name:
+**Effect on existing members:** all agents in the team keep their registrations and message history — only the team name changes. However, any session that has already cached the team name (e.g. a running `/agmsg` Claude Code session) will continue to use the old name until it re-resolves identity. After a rename, each member should re-run `whoami` from their project to pick up the new name:
 
 ```bash
 ~/.agents/skills/agmsg/scripts/whoami.sh "$(pwd)" claude-code
@@ -104,25 +123,9 @@ Same project, same agent type, different role — for example a `tech-lead` iden
 /agmsg drop biz-analyst    # remove the role from this project
 ```
 
-Mechanics:
+`actas <name>` is **exclusive across sessions**: it switches both sending and receiving to `<name>`, claims a lock that stops peer sessions from subscribing to the same name, and refuses if another session already holds it. `drop` releases the lock. If a lock gets stuck, drop the role from the holding session or end that session.
 
-- `actas <name>` is **exclusive across sessions**: switches both sending and receiving to `<name>`. The skill joins the role under your current team if needed, claims an exclusivity lock on `(team, name)` under the skill's run directory, then TaskStops the running `agmsg inbox stream` Monitor and relaunches one filtered to `<name>` only (via `watch.sh`'s optional 4th argument). Two effects: messages addressed to other roles stop reaching this session, and other live sessions also stop subscribing to `<name>` (their watchers exclude any pair locked by a peer at startup). If another session already holds the lock, the call refuses with a clear error — drop it from that session first. The lock is released by `drop`, by session end, or by garbage collection when the holding session is no longer alive.
-- `drop <name>` removes only that role's registration for this project (via `reset.sh`). If the role is no longer registered anywhere, it's also dropped from the team config. If `<name>` was the currently-active role, the watcher is restarted in default mode — no `actas` name filter, so it receives every (team, agent) pair registered for this project that isn't held by another session.
-- Switching is session-scoped state held by the agent. `/clear` or a new session resets back to the multiple-identities picker.
-- **Recovery**: `actas-claim.sh` writes the lock file before the skill TaskStops the old Monitor and launches the new one. If that subsequent dance fails (e.g. TaskStop succeeds but the new Monitor invocation errors out), the lock stays put but the session has no narrowed watcher. Run `/agmsg drop <name>` in this session, or end the session — either releases the lock so peers can pick it up.
-- **Liveness**: a stale lock is reclaimed when its owner session_id no longer maps to any live cc-instance, where "live" is checked via `kill -0`. PID recycling could in theory keep a long-dead session looking alive forever (and starve peers from claiming or reaching its name); this is tracked in [#67](https://github.com/fujibee/agmsg/issues/67) and not addressed in v1.
-- **Codex caveat**: on Codex, `$agmsg actas <name>` is **send-side only** for this session. Codex slash commands don't see a stable `session_id`, so they can't claim a peer-visible exclusivity lock — Claude Code peers will still subscribe to `<name>`. The receive side isn't actually narrowed either: `check-inbox.sh` resolves identity through `whoami.sh` (which picks the first registered agent) and has no view of the agent's in-session actas role, so Codex keeps polling whichever pair it would have without actas. The check-inbox lock filter only skips pairs *another* session owns. Treat Codex actas as a from-line override until a Codex session-id story exists. Claude Code's `/agmsg actas` does claim the lock symmetrically and is the path that exercises the full exclusivity model.
-
-#### Subscription model
-
-agmsg follows a **one CC session = one active role** model. Each watcher subscribes to a *static* set of identities decided at launch:
-
-- **Without `actas`**: the watcher subscribes to whichever `(team, agent)` pairs were registered for this `(project, agent_type)` at the moment `watch.sh` started, *minus* any pair currently locked by another live session's `actas` claim. The set is *not* re-resolved later — a peer that claims a name after this watcher launched will start receiving exclusively, but this watcher won't notice the loss until it restarts. A role joined mid-session via `actas` from another CC does *not* start arriving in CCs that were launched before it.
-- **After `actas <name>`**: the watcher is relaunched filtered to `<name>` only, and the lock that filter implies prevents peer watchers from ever subscribing to `<name>` while this session is live.
-
-This is intentional: it keeps each CC bound to one role's inbox, so a `tech-lead` window stays clear of `biz-analyst` traffic and vice versa, and the exclusivity holds across sessions on the same machine rather than per-session. To pick up a role added after a CC launched (without switching to it exclusively), restart the CC or `/clear` so SessionStart re-launches `watch.sh` with the fresh identity list — and with the up-to-date lock view.
-
-The send side mirrors this: every `send.sh` call from this CC uses the active role as the `from` agent, whether that's the implicit one (default) or the one set by the most recent `actas`.
+See [docs/actas.md](docs/actas.md) for the full mechanics — exclusivity model, recovery, liveness / PID recycling, Codex caveat.
 
 ### Reusing the same identity across projects
 
@@ -161,6 +164,8 @@ How incoming messages reach your agent. Pick one at first join via the prompt, o
 ```
 
 Settings are per-project. Each `<project>/.claude/settings.local.json` gets exactly the hooks the chosen mode needs — repeated `set` calls are idempotent.
+
+**Monitor priming**: in `monitor` mode, the receiving agent doesn't react to its first inbound message until it has taken at least one turn this session. If you've just started a fresh session and a teammate has already sent something, nudge the agent with any short message ("hi") to prime it — subsequent messages stream in real time.
 
 ### Migrating from legacy `hook on/off`
 
@@ -203,11 +208,7 @@ Codex supports `mode turn` and `mode off` only — there's no Monitor tool to st
 /agmsg                          — invokes the agmsg skill
 ```
 
-The Copilot installer drops a `SKILL.md` at `~/.copilot/skills/agmsg/` so
-`/agmsg` is auto-discovered. Per-project hooks live at
-`<project>/.github/hooks/agmsg.json`. Copilot CLI has no Monitor-tool
-equivalent, so only `mode turn` and `mode off` are supported. Asking for
-`monitor` or `both` is rejected with an error.
+The Copilot installer drops a `SKILL.md` at `~/.copilot/skills/agmsg/` so `/agmsg` is auto-discovered. Per-project hooks live at `<project>/.github/hooks/agmsg.json`. Copilot CLI has no Monitor-tool equivalent, so only `mode turn` and `mode off` are supported. Asking for `monitor` or `both` is rejected with an error.
 
 ### Shell (any agent)
 
@@ -222,7 +223,41 @@ equivalent, so only `mode turn` and `mode off` are supported. Asking for
 ~/.agents/skills/<cmd>/scripts/reset.sh <project_path> <type> [agent_id]
 ```
 
+`send.sh` takes exactly four positional arguments: `<team> <from> <to> "<message>"`. Quote the message so the shell sees it as one argument; an unquoted message with spaces will be misparsed.
+
 `hook.sh on|off` still works as a legacy alias for `delivery.sh set turn|off` but prints a deprecation notice.
+
+## FAQ / Design notes
+
+**Is this MCP? Do I need an MCP server?**
+No. agmsg is standalone — `bash` + `sqlite3`, no server, no daemon, no network. The two stacks are orthogonal: you can run agmsg alongside any MCP setup you already have.
+
+**Concurrent writes to the same channel — do they conflict?**
+The store is SQLite in WAL mode. Multiple readers and a single writer coexist; writes are short and serialized at the file level. In practice, two agents sending into the same team don't collide.
+
+**Does SQLite guarantee turn order? Is there a lock or token?**
+SQLite guarantees the ordering of the log itself — every row has a monotonic id and timestamp. Turn-taking between agents is a protocol-level concern, not enforced by the transport. The floor is intentionally dumb; the protocol lives in your prompts.
+
+**Two Claude Code instances grab the same task — claim/lock?**
+Not in v1. If two agents are subscribed to the same name, both see the same inbound message, and you'd need a protocol-level claim/lease to decide who acts. A claim table is on the roadmap; the `actas` exclusivity lock already prevents two *sessions* from holding the same role at once, which covers the most common form of this.
+
+**Runaway loops — where does the stop condition live?**
+At the protocol/prompt level, not the transport. Common pattern: include a max-turns or explicit done-signal instruction in the kickoff prompt ("stop after N exchanges", "reply DONE when complete"). agmsg won't cut a conversation off for you.
+
+**What's carried on a handoff — context, diffs, or just text?**
+Plain text. Messages are short — a sentence, a request, a path. Agents pass *summaries and references* (file paths, commit SHAs, issue numbers), not raw context. Transport is the message; semantic packing is up to the prompt.
+
+**What if the output exceeds the receiver's context window?**
+Use the summary + file-reference pattern: write the artifact to disk, send a one-line pointer. The DB stores messages, not files.
+
+**Does it hold up with more than 2 agents?**
+Yes. Teams are N-agent. The demo is 2 for clarity; larger rooms work the same way — we run our own 8-agent team on it.
+
+**Does context persist across sessions?**
+Yes. Messages live in SQLite and survive sessions. `history.sh <team>` replays the room.
+
+**Can I re-seed a fresh agent from an old room?**
+The message store is effectively a replay log. There's no one-shot "rehydrate from room X" command yet, but `history.sh` gives you the transcript and you can prompt a new agent with it. Treat persistence as the unlock that makes that possible.
 
 ## Update
 
@@ -282,14 +317,22 @@ bats tests/    # requires bats-core: brew install bats-core
 
 - **Storage**: Single SQLite file with WAL mode
 - **Concurrency**: Multiple readers + 1 writer, no conflicts
-- **Dependencies**: bash, sqlite3 (no python3 required)
-- **Auto detection**: Stop hook checks inbox after each response (60s cooldown)
+- **Dependencies**: `bash`, `sqlite3` (no Python required)
+- **Auto detection**: Stop hook checks inbox after each response (60s cooldown, configurable via `hook.check_interval`)
 - **No daemon**: Direct filesystem access
 - **No network**: Everything local
+
+## Community
+
+- **Product Hunt**: #5 Product of the Day, [2026-06-09 launch](https://www.producthunt.com/products/agmsg) — 219 upvotes, 39 comments
+- **Derivative projects**: `agmsg-shogi`, `agmsg-go`, `agmsg-mcp` (community-built)
+- **External contributors**: [@MiuraKatsu](https://github.com/MiuraKatsu) (Gemini support + whoami auto-detect), [@roundrop](https://github.com/roundrop) (Copilot CLI support), [@TOMONOSUKEJP](https://github.com/TOMONOSUKEJP) (native Windows / Git Bash), [@kenshin-yamada](https://github.com/kenshin-yamada) (watcher scoping fix), [@utenadev](https://github.com/utenadev) (OpenCode contribution)
 
 ## Contributing
 
 See [Design & Architecture](docs/design.md) for developer documentation — identity model, data storage, hook system, and script responsibilities.
+
+If agmsg saves you copy-paste round-trips, a GitHub star helps other people find it.
 
 ## License
 
