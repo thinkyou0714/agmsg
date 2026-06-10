@@ -230,33 +230,43 @@ The Copilot installer drops a `SKILL.md` at `~/.copilot/skills/agmsg/` so `/agms
 ## FAQ / Design notes
 
 **Is this MCP? Do I need an MCP server?**
+
 No. agmsg is standalone — `bash` + `sqlite3`, no server, no daemon, no network. The two stacks are orthogonal: you can run agmsg alongside any MCP setup you already have.
 
 **Concurrent writes to the same channel — do they conflict?**
+
 The store is SQLite in WAL mode. Multiple readers and a single writer coexist; writes are short and serialized at the file level. In practice, two agents sending into the same team don't collide.
 
 **Does SQLite guarantee turn order? Is there a lock or token?**
+
 SQLite guarantees the ordering of the log itself — every row has a monotonic id and timestamp. Turn-taking between agents is a protocol-level concern, not enforced by the transport. The floor is intentionally dumb; the protocol lives in your prompts.
 
 **Two Claude Code instances grab the same task — claim/lock?**
+
 Not in v1. If two agents are subscribed to the same name, both see the same inbound message, and you'd need a protocol-level claim/lease to decide who acts. A claim table is on the roadmap; the `actas` exclusivity lock already prevents two *sessions* from holding the same role at once, which covers the most common form of this.
 
 **Runaway loops — where does the stop condition live?**
+
 At the protocol/prompt level, not the transport. Common pattern: include a max-turns or explicit done-signal instruction in the kickoff prompt ("stop after N exchanges", "reply DONE when complete"). agmsg won't cut a conversation off for you.
 
 **What's carried on a handoff — context, diffs, or just text?**
+
 Plain text. Messages are short — a sentence, a request, a path. Agents pass *summaries and references* (file paths, commit SHAs, issue numbers), not raw context. Transport is the message; semantic packing is up to the prompt.
 
 **What if the output exceeds the receiver's context window?**
+
 Use the summary + file-reference pattern: write the artifact to disk, send a one-line pointer. The DB stores messages, not files.
 
 **Does it hold up with more than 2 agents?**
+
 Yes. Teams are N-agent. The demo is 2 for clarity; larger rooms work the same way — we run our own 8-agent team on it.
 
 **Does context persist across sessions?**
+
 Yes. Messages live in SQLite and survive sessions. `history.sh <team>` replays the room.
 
 **Can I re-seed a fresh agent from an old room?**
+
 The message store is effectively a replay log. There's no one-shot "rehydrate from room X" command yet, but `history.sh` gives you the transcript and you can prompt a new agent with it. Treat persistence as the unlock that makes that possible.
 
 ## Update
