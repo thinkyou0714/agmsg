@@ -103,6 +103,19 @@ Same project, same agent type, different role — for example a `tech-lead` iden
 
 See [docs/actas.md](docs/actas.md) for the full mechanics — exclusivity model, recovery, liveness / PID recycling, Codex caveat.
 
+### Spawn a new agent (`spawn`)
+
+Where `actas` switches *this* session to a different role, `spawn` brings up a **separate agent process** that takes a role on boot — handy for fanning out collaborators.
+
+```
+/agmsg spawn codex reviewer            # new codex agent, joins and becomes "reviewer"
+/agmsg spawn claude-code alice --window  # new claude-code agent in a fresh tmux window
+```
+
+`spawn <type> <name>` pre-joins `<name>`, then launches the target CLI with `/agmsg actas <name>` as its initial prompt. If the current session is inside **tmux**, it opens in a new pane (or `--window` for a new window, `--split h|v` for the direction); otherwise it opens a new **OS terminal** window. Options: `--project <path>` (default: current project), `--team <team>` (auto-resolved when the project has a single team), and `--terminal <tmpl>` / `$AGMSG_TERMINAL` / config `spawn.terminal` to override the terminal command on the non-tmux path (a `{cmd}` placeholder is replaced with the launch command).
+
+Only `claude-code` and `codex` are supported today. macOS is the primary target; Linux and Windows are best-effort (please open an issue/PR if your terminal isn't handled). Headless environments — no tmux **and** no usable terminal — error out, since the agent CLIs need an interactive terminal.
+
 ## Delivery modes
 
 How incoming messages reach your agent. Pick one at first join via the prompt, or change it later with `/agmsg mode <name>`.
@@ -151,6 +164,7 @@ The command updates `db/config.yaml`, rewrites the project's hook entries, and p
 /agmsg mode                             — show current mode
 /agmsg actas <name>                     — switch to another role in this project (create if needed)
 /agmsg drop <name>                      — remove a role from this project
+/agmsg spawn <type> <name>              — launch a new agent (claude-code/codex) that takes <name>
 /agmsg hook on | off                    — legacy aliases (mode turn | off)
 /agmsg reset                            — clear current project registration
 ```
