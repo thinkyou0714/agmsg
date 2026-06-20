@@ -20,6 +20,10 @@ SKILL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 RUN_DIR="$SKILL_DIR/run"
 PROJECT_HASH="$(printf '%s' "$PROJECT" | shasum | awk '{print $1}')"
 REQUEST_FILE="$RUN_DIR/codex-bridge-request.$PROJECT_HASH"
+
+# shellcheck source=lib/node.sh
+source "$SCRIPT_DIR/lib/node.sh"
+NODE_BIN="$(agmsg_resolve_node)"
 TAB="$(printf '\t')"
 
 mkdir -p "$RUN_DIR"
@@ -75,7 +79,7 @@ EOF
     fi
   fi
 
-  nohup "$bridge_cmd" \
+  nohup "$NODE_BIN" "$bridge_cmd" \
     --project "$PROJECT" \
     --type "$TYPE" \
     --team "$team" \

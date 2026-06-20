@@ -34,6 +34,8 @@ RUN_DIR="$SKILL_DIR/run"
 source "$SCRIPT_DIR/lib/actas-lock.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/resolve-project.sh"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/node.sh"
 
 # Identity sanity check — no point launching a watcher with an empty pair set.
 PAIRS=$("$SCRIPT_DIR/identities.sh" "$PROJECT" "$TYPE" 2>/dev/null || true)
@@ -141,7 +143,8 @@ if [ "$TYPE" = "codex" ]; then
 
   log="$RUN_DIR/codex-bridge.$team.$name.log"
   bridge_cmd="${AGMSG_CODEX_BRIDGE_CMD:-$SCRIPT_DIR/codex-bridge.js}"
-  nohup "$bridge_cmd" \
+  node_bin="$(agmsg_resolve_node)"
+  nohup "$node_bin" "$bridge_cmd" \
     --project "$PROJECT" \
     --type "$TYPE" \
     --team "$team" \
