@@ -92,18 +92,24 @@ if [ -f "$PORT_FILE" ]; then
 fi
 
 if [ -z "$PORT" ]; then
-  PORT="$(node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{process.stdout.write(String(s.address().port));s.close();});' 2>/dev/null || true)"
-  if [ -z "$PORT" ]; then
-    echo "codex-monitor: could not allocate a loopback port (is node available?)" >&2
-    exit 1
-  fi
-  "$REAL_CODEX" app-server --listen "ws://127.0.0.1:$PORT" >>"$SERVER_LOG" 2>&1 &
+  # Let the app-server pick a free loopback port (--listen ws://127.0.0.1:0) and
+  # report it ("listening on: ws://127.0.0.1:<port>"). This keeps codex-monitor.sh
+  # free of any Node dependency — only the bridge (codex-bridge.js) needs Node, and
+  # it degrades on its own if Node is missing rather than taking down the TUI. See #170.
+  : > "$SERVER_LOG"
+  "$REAL_CODEX" app-server --listen "ws://127.0.0.1:0" >>"$SERVER_LOG" 2>&1 &
   echo "$!" > "$SERVER_PID"
-  printf '%s' "$PORT" > "$PORT_FILE"
-  for _ in $(seq 1 50); do
-    port_alive "$PORT" && break
+  for _ in $(seq 1 100); do
+    PORT="$(sed -n 's#.*listening on: ws://127\.0\.0\.1:\([0-9][0-9]*\).*#\1#p' "$SERVER_LOG" | head -1)"
+    [ -n "$PORT" ] && break
     sleep 0.1
   done
+  if [ -z "$PORT" ]; then
+    echo "codex-monitor: app-server did not report a listening port" >&2
+    echo "codex-monitor: see $SERVER_LOG" >&2
+    exit 1
+  fi
+  printf '%s' "$PORT" > "$PORT_FILE"
 fi
 
 if ! port_alive "$PORT"; then
