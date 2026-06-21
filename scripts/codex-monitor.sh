@@ -19,11 +19,14 @@ REAL_CODEX="${AGMSG_REAL_CODEX:-codex}"
 
 usage() {
   cat <<EOF
-Usage: codex-monitor.sh [--project <path>] [--socket-path <path>] [--codex-command <codex|resume>] [-- <args...>]
+Usage: codex-monitor.sh [--project <path>] [--codex-command <codex|resume>] [-- <args...>]
 
-Starts/reuses an agmsg-managed Codex app-server socket, enables agmsg Codex
-bridge hooks for this project, then execs:
-  codex resume --remote <socket>
+Starts/reuses an agmsg-managed Codex app-server on a loopback ws:// port,
+enables agmsg Codex bridge delivery for this project, then execs:
+  codex resume --remote ws://127.0.0.1:<port>
+
+(--socket-path is accepted for compatibility but ignored: codex 0.141+ requires
+a ws:// transport for --remote. See #170.)
 EOF
 }
 
@@ -67,31 +70,59 @@ esac
 
 PROJECT="$(cd "$PROJECT" && pwd)"
 PROJECT_HASH="$(printf '%s' "$PROJECT" | shasum | awk '{print $1}')"
-[ -n "$SOCKET_PATH" ] || SOCKET_PATH="$RUN_DIR/codex-app-server.$PROJECT_HASH.sock"
-case "$SOCKET_PATH" in
-  /*) ;;
-  *) SOCKET_PATH="$PROJECT/$SOCKET_PATH" ;;
-esac
-SOCKET_URL="unix://$SOCKET_PATH"
 SERVER_LOG="$RUN_DIR/codex-app-server.$PROJECT_HASH.log"
 SERVER_PID="$RUN_DIR/codex-app-server.$PROJECT_HASH.pid"
+PORT_FILE="$RUN_DIR/codex-app-server.$PROJECT_HASH.port"
 
-mkdir -p "$RUN_DIR" "$(dirname "$SOCKET_PATH")"
+mkdir -p "$RUN_DIR"
 
-if [ ! -S "$SOCKET_PATH" ]; then
-  "$REAL_CODEX" app-server --listen "$SOCKET_URL" >>"$SERVER_LOG" 2>&1 &
-  echo "$!" > "$SERVER_PID"
-  for _ in $(seq 1 50); do
-    [ -S "$SOCKET_PATH" ] && break
-    sleep 0.1
-  done
+# codex 0.141+ accepts only ws:// (not unix://) for the TUI's --remote, so the
+# shared app-server listens on a loopback ws port instead of a unix socket. The
+# port is recorded per project so a second monitor reuses a live server. See #170.
+port_alive() {  # $1 = port; succeeds if something is accepting on 127.0.0.1:$1
+  (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null
+}
+
+PORT=""
+if [ -f "$PORT_FILE" ] && [ -f "$SERVER_PID" ]; then
+  existing_port="$(cat "$PORT_FILE" 2>/dev/null || true)"
+  existing_pid="$(cat "$SERVER_PID" 2>/dev/null || true)"
+  # Reuse only when OUR recorded app-server is still alive AND its port answers,
+  # so a foreign process that grabbed the same port after ours died is not
+  # mistaken for the bridge app-server.
+  if [ -n "$existing_port" ] && [ -n "$existing_pid" ] \
+    && kill -0 "$existing_pid" 2>/dev/null && port_alive "$existing_port"; then
+    PORT="$existing_port"
+  fi
 fi
 
-if [ ! -S "$SOCKET_PATH" ]; then
-  echo "codex-monitor: app-server socket did not appear: $SOCKET_PATH" >&2
+if [ -z "$PORT" ]; then
+  # Let the app-server pick a free loopback port (--listen ws://127.0.0.1:0) and
+  # report it ("listening on: ws://127.0.0.1:<port>"). This keeps codex-monitor.sh
+  # free of any Node dependency — only the bridge (codex-bridge.js) needs Node, and
+  # it degrades on its own if Node is missing rather than taking down the TUI. See #170.
+  : > "$SERVER_LOG"
+  "$REAL_CODEX" app-server --listen "ws://127.0.0.1:0" >>"$SERVER_LOG" 2>&1 &
+  echo "$!" > "$SERVER_PID"
+  for _ in $(seq 1 100); do
+    PORT="$(sed -n 's#.*listening on: ws://127\.0\.0\.1:\([0-9][0-9]*\).*#\1#p' "$SERVER_LOG" | head -1)"
+    [ -n "$PORT" ] && break
+    sleep 0.1
+  done
+  if [ -z "$PORT" ]; then
+    echo "codex-monitor: app-server did not report a listening port" >&2
+    echo "codex-monitor: see $SERVER_LOG" >&2
+    exit 1
+  fi
+  printf '%s' "$PORT" > "$PORT_FILE"
+fi
+
+if ! port_alive "$PORT"; then
+  echo "codex-monitor: app-server did not start on ws://127.0.0.1:$PORT" >&2
   echo "codex-monitor: see $SERVER_LOG" >&2
   exit 1
 fi
+SOCKET_URL="ws://127.0.0.1:$PORT"
 
 "$SCRIPT_DIR/delivery.sh" set monitor codex "$PROJECT" >/dev/null
 

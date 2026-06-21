@@ -34,6 +34,8 @@ RUN_DIR="$SKILL_DIR/run"
 source "$SCRIPT_DIR/lib/actas-lock.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/resolve-project.sh"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/node.sh"
 
 # Identity sanity check — no point launching a watcher with an empty pair set.
 PAIRS=$("$SCRIPT_DIR/identities.sh" "$PROJECT" "$TYPE" 2>/dev/null || true)
@@ -140,8 +142,16 @@ if [ "$TYPE" = "codex" ]; then
   fi
 
   log="$RUN_DIR/codex-bridge.$team.$name.log"
-  bridge_cmd="${AGMSG_CODEX_BRIDGE_CMD:-$SCRIPT_DIR/codex-bridge.js}"
-  nohup "$bridge_cmd" \
+  # An explicit AGMSG_CODEX_BRIDGE_CMD is a complete runnable (tests, custom
+  # wrappers) — run it as-is. Only the default codex-bridge.js is launched
+  # through a resolved Node, since its env-node shebang fails in shells where a
+  # version-manager Node is not on PATH (#170).
+  if [ -n "${AGMSG_CODEX_BRIDGE_CMD:-}" ]; then
+    bridge_run=("$AGMSG_CODEX_BRIDGE_CMD")
+  else
+    bridge_run=("$(agmsg_resolve_node)" "$SCRIPT_DIR/codex-bridge.js")
+  fi
+  nohup "${bridge_run[@]}" \
     --project "$PROJECT" \
     --type "$TYPE" \
     --team "$team" \
