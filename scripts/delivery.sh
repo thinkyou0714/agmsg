@@ -136,23 +136,33 @@ agmsg_delivery_apply_default() {
   mv "$tmp_state" "$hooks_file"
 }
 
-# Apply delivery settings for a type (Template Method). A type may ship a
-# delivery plug at types/<name>/_delivery.sh that defines agmsg_delivery_apply to
-# override the default JSON event-hooks behavior; otherwise the default is used.
-apply_settings() {
-  local type="$1"
-  local project="$2"
-  local mode="$3"
+# Default delivery entry points (Template Method). A type's plug
+# (types/<name>/_delivery.sh) may override any subset of these:
+#   agmsg_delivery_apply      — write the hook file for a mode (default: JSON event-hooks)
+#   agmsg_delivery_on_enable  — side effects when enabling monitor/both (default: none)
+#   agmsg_delivery_on_disable — side effects when turning delivery off  (default: none)
+# A plug that wants the default apply can delegate to agmsg_delivery_apply_default.
+agmsg_delivery_apply() { agmsg_delivery_apply_default "$@"; }
+agmsg_delivery_on_enable() { :; }
+# Default 'off' teardown: stop this project's watch.sh watchers. A type with its
+# own runtime (e.g. codex's bridge) overrides this. Args: <type> <project>.
+agmsg_delivery_on_disable() { kill_all_watchers "$2" >/dev/null 2>&1 || true; }
 
+# Source the type's delivery plug (if present) so its overrides take effect.
+# One type is handled per invocation, so the global overrides never go stale.
+agmsg_delivery_load_plug() {
   local tdir
-  tdir="$(agmsg_type_dir "$type" 2>/dev/null || true)"
+  tdir="$(agmsg_type_dir "$1" 2>/dev/null || true)"
   if [ -n "$tdir" ] && [ -f "$tdir/_delivery.sh" ]; then
     # shellcheck disable=SC1090
     . "$tdir/_delivery.sh"
-    agmsg_delivery_apply "$type" "$project" "$mode"
-  else
-    agmsg_delivery_apply_default "$type" "$project" "$mode"
   fi
+}
+
+apply_settings() {
+  local type="$1" project="$2" mode="$3"
+  agmsg_delivery_load_plug "$type"
+  agmsg_delivery_apply "$type" "$project" "$mode"
 }
 
 CODEX_MONITOR_DOC_URL="https://github.com/fujibee/agmsg/blob/main/docs/codex-monitor-beta.md"
@@ -264,49 +274,9 @@ do_set() {
 
   case "$MODE" in
     monitor|both)
-      if [ "$TYPE" = "codex" ]; then
-        if AGMSG_CODEX_SHIM_INSTALL_QUIET=1 "$SKILL_DIR/scripts/codex/codex-shim-install.sh" install; then
-          echo "Codex monitor shim installed at ~/.agents/bin/codex."
-          case ":$PATH:" in
-            *":$HOME/.agents/bin:"*)
-              echo "Future Codex sessions: launch with codex. In monitor-mode projects, the agmsg shim routes interactive Codex sessions through the bridge."
-              ;;
-            *)
-              # Loud, unambiguous: this is the #1 reason monitor silently does nothing.
-              echo "WARNING: ~/.agents/bin is NOT on your PATH, so 'codex' still launches the real"
-              echo "  binary and the monitor bridge will NOT engage. Add this line, restart your shell,"
-              echo "  then launch with codex:"
-              echo "    export PATH=\"\$HOME/.agents/bin:\$PATH\""
-              ;;
-          esac
-        else
-          echo "Codex monitor mode is enabled, but the codex shim was not installed."
-          echo "Future Codex sessions: launch with $SKILL_DIR/scripts/codex/codex-monitor.sh, or resolve the shim install issue above."
-        fi
-        # Node preflight: the bridge (codex-bridge.js) is a Node program, so
-        # without Node it silently never starts — flag it here at enable time.
-        # Presence only: the bridge uses old/stable APIs (the sole modern feature
-        # is one optional-chaining call, Node 14+), and any Node new enough to run
-        # Codex itself runs the bridge — so a version gate would be noise.
-        # Resolve via the same path the runtime uses (lib/node.sh) so this warning
-        # matches what the launcher will actually do — including a version-manager
-        # Node off PATH. AGMSG_NODE / AGMSG_CODEX_NODE override the binary.
-        codex_node="$(agmsg_resolve_node)"
-        if ! command -v "$codex_node" >/dev/null 2>&1 && [ ! -x "$codex_node" ]; then
-          echo "WARNING: Node.js ('$codex_node') was not found. The Codex bridge needs Node —"
-          echo "  monitor delivery will NOT start until Node is installed (or set AGMSG_NODE)."
-        fi
-        # The bridge launches from the Codex SessionStart hook, which fires on the
-        # FIRST turn of a new session (not the moment Codex opens) — and an
-        # already-running session is not retrofitted (#151; launcher internals #153).
-        echo "Restart your Codex session (quit and relaunch \`codex\`), then send your first"
-        echo "  message — the bridge starts on your first turn, not the moment Codex opens."
-        echo "  Already-running sessions stay unmonitored until they restart."
-        echo "For more info: $CODEX_MONITOR_DOC_URL"
-      else
-        echo "Future sessions: SessionStart hook will auto-launch the watcher."
-        emit_monitor_directive "$TYPE" "$PROJECT"
-      fi
+      # Type-specific enable side effects (shim install, watcher directive, …)
+      # live in the type's plug as agmsg_delivery_on_enable; default is none.
+      agmsg_delivery_on_enable "$MODE" "$TYPE" "$PROJECT"
       ;;
     turn)
       echo "Future sessions: Stop hook will check inbox between turns."
@@ -316,19 +286,9 @@ do_set() {
       ;;
     off)
       echo "Future sessions: no automatic delivery."
-      if [ "$TYPE" = "codex" ]; then
-        local stopped
-        stopped=$(stop_codex_bridge "$PROJECT")
-        if [ "${stopped:-0}" -gt 0 ]; then
-          echo "Stopped $stopped Codex bridge process(es) for this project and cleaned their run files."
-        fi
-        echo "Note: the codex shim (~/.agents/bin/codex) is shared across projects, so it was left in place."
-        echo "  If no other project uses monitor mode, remove it and restore your PATH:"
-        echo "    $SKILL_DIR/scripts/codex/codex-shim-install.sh remove"
-        echo "    # then drop ~/.agents/bin from PATH if you added it for monitor"
-      else
-        kill_all_watchers "$PROJECT" >/dev/null 2>&1 || true
-      fi
+      # Type-specific teardown via the plug (default: stop this project's
+      # watchers; codex stops its bridge instead).
+      agmsg_delivery_on_disable "$TYPE" "$PROJECT"
       emit_stop_directive
       ;;
   esac
