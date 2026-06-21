@@ -148,6 +148,56 @@ agmsg_delivery_on_enable() { :; }
 # own runtime (e.g. codex's bridge) overrides this. Args: <type> <project>.
 agmsg_delivery_on_disable() { kill_all_watchers "$2" >/dev/null 2>&1 || true; }
 
+# Default delivery status (json-hooks types: claude-code, codex). Derives the mode
+# from the settings hooks file's agmsg-owned SessionStart/Stop entries, then prints
+# the per-event entry detail. Rule-file types override agmsg_delivery_status.
+agmsg_delivery_status_default() {
+  local type="$1" project="$2"
+  local hf
+  hf=$(resolve_hooks_file "$type" "$project")
+  local has_ss=0 has_st=0
+  if [ -f "$hf" ]; then
+    local sql_hf
+    sql_hf=$(sql_readfile_path "$hf")
+    has_ss=$(agmsg_sqlite_mem "
+      SELECT EXISTS(
+        SELECT 1 FROM json_each(json_extract(readfile('$sql_hf'), '\$.hooks.SessionStart')) AS s,
+          json_each(json_extract(s.value, '\$.hooks')) AS h
+        WHERE instr(json_extract(h.value, '\$.command'), '$SKILL_NAME') > 0
+      );" 2>/dev/null || echo 0)
+    has_st=$(agmsg_sqlite_mem "
+      SELECT EXISTS(
+        SELECT 1 FROM json_each(json_extract(readfile('$sql_hf'), '\$.hooks.Stop')) AS s,
+          json_each(json_extract(s.value, '\$.hooks')) AS h
+        WHERE instr(json_extract(h.value, '\$.command'), '$SKILL_NAME') > 0
+      );" 2>/dev/null || echo 0)
+  fi
+  local mode="off"
+  if [ "$has_ss" = "1" ] && [ "$has_st" = "1" ]; then mode="both"
+  elif [ "$has_ss" = "1" ]; then mode="monitor"
+  elif [ "$has_st" = "1" ]; then mode="turn"
+  fi
+  echo "mode: $mode"
+
+  if [ -f "$hf" ]; then
+    local sql_hf count
+    sql_hf=$(sql_readfile_path "$hf")
+    # readfile() rather than interpolating the file contents into argv —
+    # for large settings (#95) the latter hits MAX_ARG_STRLEN on Linux.
+    count=$(agmsg_sqlite_mem "SELECT json_array_length(json_extract(readfile('$sql_hf'), '\$.hooks.SessionStart'));" 2>/dev/null || echo 0)
+    case "$count" in ''|*[!0-9]*) count=0 ;; esac
+    echo "settings hooks file: $hf"
+    echo "  SessionStart entries: $count"
+    count=$(agmsg_sqlite_mem "SELECT json_array_length(json_extract(readfile('$sql_hf'), '\$.hooks.SessionEnd'));" 2>/dev/null || echo 0)
+    case "$count" in ''|*[!0-9]*) count=0 ;; esac
+    echo "  SessionEnd entries:   $count"
+    count=$(agmsg_sqlite_mem "SELECT json_array_length(json_extract(readfile('$sql_hf'), '\$.hooks.Stop'));" 2>/dev/null || echo 0)
+    case "$count" in ''|*[!0-9]*) count=0 ;; esac
+    echo "  Stop entries:         $count"
+  fi
+}
+agmsg_delivery_status() { agmsg_delivery_status_default "$@"; }
+
 # Source the type's delivery plug (if present) so its overrides take effect.
 # One type is handled per invocation, so the global overrides never go stale.
 agmsg_delivery_load_plug() {
@@ -302,62 +352,11 @@ do_status() {
   # global mode value. When called without <type> <project>, we can't infer
   # a project-scoped mode, so we just skip the mode line and report the
   # global watcher state below.
+  # Mode + per-type status detail come from the type's delivery plug
+  # (agmsg_delivery_status); default is JSON event-hooks, rule-file types override.
   if [ -n "$TYPE" ] && [ -n "$PROJECT" ]; then
-    local hf
-    hf=$(resolve_hooks_file "$TYPE" "$PROJECT")
-    if [ "$TYPE" = "gemini" ] || [ "$TYPE" = "antigravity" ] || [ "$TYPE" = "copilot" ] || [ "$TYPE" = "opencode" ]; then
-      local mode="off"
-      if [ -f "$hf" ]; then
-        mode="turn"
-      fi
-      echo "mode: $mode"
-    else
-      local has_ss=0 has_st=0
-      if [ -f "$hf" ]; then
-        local sql_hf
-        sql_hf=$(sql_readfile_path "$hf")
-        has_ss=$(agmsg_sqlite_mem "
-          SELECT EXISTS(
-            SELECT 1 FROM json_each(json_extract(readfile('$sql_hf'), '\$.hooks.SessionStart')) AS s,
-              json_each(json_extract(s.value, '\$.hooks')) AS h
-            WHERE instr(json_extract(h.value, '\$.command'), '$SKILL_NAME') > 0
-          );" 2>/dev/null || echo 0)
-        has_st=$(agmsg_sqlite_mem "
-          SELECT EXISTS(
-            SELECT 1 FROM json_each(json_extract(readfile('$sql_hf'), '\$.hooks.Stop')) AS s,
-              json_each(json_extract(s.value, '\$.hooks')) AS h
-            WHERE instr(json_extract(h.value, '\$.command'), '$SKILL_NAME') > 0
-          );" 2>/dev/null || echo 0)
-      fi
-      local mode="off"
-      if [ "$has_ss" = "1" ] && [ "$has_st" = "1" ]; then mode="both"
-      elif [ "$has_ss" = "1" ]; then mode="monitor"
-      elif [ "$has_st" = "1" ]; then mode="turn"
-      fi
-      echo "mode: $mode"
-    fi
-  fi
-
-  if [ -n "$TYPE" ] && [ -n "$PROJECT" ] && [ "$TYPE" != "gemini" ] && [ "$TYPE" != "antigravity" ] && [ "$TYPE" != "copilot" ] && [ "$TYPE" != "opencode" ]; then
-    local hooks_file
-    hooks_file=$(resolve_hooks_file "$TYPE" "$PROJECT")
-    if [ -f "$hooks_file" ]; then
-      local count
-      local sql_hooks_file
-      sql_hooks_file=$(sql_readfile_path "$hooks_file")
-      # readfile() rather than interpolating the file contents into argv —
-      # for large settings (#95) the latter hits MAX_ARG_STRLEN on Linux.
-      count=$(agmsg_sqlite_mem "SELECT json_array_length(json_extract(readfile('$sql_hooks_file'), '\$.hooks.SessionStart'));" 2>/dev/null || echo 0)
-      case "$count" in ''|*[!0-9]*) count=0 ;; esac
-      echo "settings hooks file: $hooks_file"
-      echo "  SessionStart entries: $count"
-      count=$(agmsg_sqlite_mem "SELECT json_array_length(json_extract(readfile('$sql_hooks_file'), '\$.hooks.SessionEnd'));" 2>/dev/null || echo 0)
-      case "$count" in ''|*[!0-9]*) count=0 ;; esac
-      echo "  SessionEnd entries:   $count"
-      count=$(agmsg_sqlite_mem "SELECT json_array_length(json_extract(readfile('$sql_hooks_file'), '\$.hooks.Stop'));" 2>/dev/null || echo 0)
-      case "$count" in ''|*[!0-9]*) count=0 ;; esac
-      echo "  Stop entries:         $count"
-    fi
+    agmsg_delivery_load_plug "$TYPE"
+    agmsg_delivery_status "$TYPE" "$PROJECT"
   fi
 
   if [ -d "$RUN_DIR" ]; then

@@ -52,3 +52,4 @@ agmsg_delivery_apply() {
 EOF
   fi
 }
+agmsg_delivery_status() { rulefile_status "$@"; }

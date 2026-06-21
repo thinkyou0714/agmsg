@@ -5,3 +5,4 @@
 # agmsg_delivery_apply. rulefile_apply is provided by
 # scripts/lib/delivery-rulefile.sh, which delivery.sh sources first.
 agmsg_delivery_apply() { rulefile_apply "$@"; }
+agmsg_delivery_status() { rulefile_status "$@"; }

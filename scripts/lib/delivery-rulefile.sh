@@ -36,3 +36,12 @@ EOF
       ;;
   esac
 }
+
+# Status for rule-file types: the rule file's presence is the whole state —
+# present means turn-mode is active, absent means off (no monitor for these).
+rulefile_status() {
+  local type="$1" project="$2"
+  local rule_file
+  rule_file="$(resolve_hooks_file "$type" "$project")"
+  if [ -f "$rule_file" ]; then echo "mode: turn"; else echo "mode: off"; fi
+}

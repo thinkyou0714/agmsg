@@ -34,3 +34,4 @@ After each tool call, automatically check the agmsg inbox for unread messages.
 EOF
   fi
 }
+agmsg_delivery_status() { rulefile_status "$@"; }
