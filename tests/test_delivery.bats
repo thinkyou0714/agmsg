@@ -22,7 +22,7 @@ agmsg_entries() {
   local event="$2"
   if [ ! -f "$file" ]; then echo 0; return; fi
   sqlite_mem "
-    SELECT count(*) FROM json_each(json_extract(readfile('$file'), '\$.hooks.$event')) AS s
+    SELECT count(*) FROM json_each(json_extract(readfile('$(rf "$file")'), '\$.hooks.$event')) AS s
     WHERE EXISTS (
       SELECT 1 FROM json_each(json_extract(s.value, '\$.hooks')) AS h
       WHERE instr(json_extract(h.value, '\$.command'), 'agmsg') > 0
@@ -80,7 +80,7 @@ settings_file() {
   bash "$SCRIPTS/delivery.sh" set monitor claude-code "$TEST_PROJECT"
   bash "$SCRIPTS/delivery.sh" set monitor claude-code "$TEST_PROJECT"
   local n
-  n=$(sqlite_mem "SELECT json_array_length(json_extract(readfile('$(settings_file)'), '\$.hooks.SessionStart'));")
+  n=$(sqlite_mem "SELECT json_array_length(json_extract(readfile('$(rf "$(settings_file)")'), '\$.hooks.SessionStart'));")
   [ "$n" = "1" ]
 }
 
@@ -88,8 +88,8 @@ settings_file() {
   bash "$SCRIPTS/delivery.sh" set both claude-code "$TEST_PROJECT"
   bash "$SCRIPTS/delivery.sh" set both claude-code "$TEST_PROJECT"
   local s t
-  s=$(sqlite_mem "SELECT json_array_length(json_extract(readfile('$(settings_file)'), '\$.hooks.SessionStart'));")
-  t=$(sqlite_mem "SELECT json_array_length(json_extract(readfile('$(settings_file)'), '\$.hooks.Stop'));")
+  s=$(sqlite_mem "SELECT json_array_length(json_extract(readfile('$(rf "$(settings_file)")'), '\$.hooks.SessionStart'));")
+  t=$(sqlite_mem "SELECT json_array_length(json_extract(readfile('$(rf "$(settings_file)")'), '\$.hooks.Stop'));")
   [ "$s" = "1" ]
   [ "$t" = "1" ]
 }
@@ -124,7 +124,7 @@ settings_file() {
   echo '{"permissions":{"allow":["Bash"]}}' > "$(settings_file)"
   bash "$SCRIPTS/delivery.sh" set monitor claude-code "$TEST_PROJECT"
   local p
-  p=$(sqlite_mem "SELECT json_extract(readfile('$(settings_file)'), '\$.permissions.allow[0]');")
+  p=$(sqlite_mem "SELECT json_extract(readfile('$(rf "$(settings_file)")'), '\$.permissions.allow[0]');")
   [ "$p" = "Bash" ]
 }
 
@@ -141,7 +141,7 @@ settings_file() {
 
   # Still valid JSON, the multibyte value survived byte-for-byte, hook landed.
   local valid
-  valid=$(sqlite_mem "SELECT json_valid(readfile('$(settings_file)'));")
+  valid=$(sqlite_mem "SELECT json_valid(readfile('$(rf "$(settings_file)")'));")
   [ "$valid" = "1" ]
   grep -q "日本語のメモ" "$(settings_file)"
   grep -q "session-start.sh" "$(settings_file)"
@@ -360,7 +360,7 @@ has_session_end() {
   bash "$SCRIPTS/delivery.sh" set monitor claude-code "$TEST_PROJECT"
   bash "$SCRIPTS/delivery.sh" set monitor claude-code "$TEST_PROJECT"
   local n
-  n=$(sqlite_mem "SELECT json_array_length(json_extract(readfile('$(settings_file)'), '\$.hooks.SessionEnd'));")
+  n=$(sqlite_mem "SELECT json_array_length(json_extract(readfile('$(rf "$(settings_file)")'), '\$.hooks.SessionEnd'));")
   [ "$n" = "1" ]
 }
 
@@ -568,10 +568,10 @@ EOF
   [ -f "$hook_file" ]
   # JSON sanity: version=1, Stop entry references check-inbox.sh
   local v
-  v=$(sqlite_mem "SELECT json_extract(readfile('$hook_file'), '\$.version');")
+  v=$(sqlite_mem "SELECT json_extract(readfile('$(rf "$hook_file")'), '\$.version');")
   [ "$v" = "1" ]
   local cmd
-  cmd=$(sqlite_mem "SELECT json_extract(readfile('$hook_file'), '\$.hooks.Stop[0].bash');")
+  cmd=$(sqlite_mem "SELECT json_extract(readfile('$(rf "$hook_file")'), '\$.hooks.Stop[0].bash');")
   [[ "$cmd" =~ "check-inbox.sh" ]]
   [[ "$cmd" =~ "copilot" ]]
 }
@@ -602,7 +602,7 @@ EOF
   [ "$status" -ne 0 ]
   [ -f "$TEST_PROJECT/.github/hooks/agmsg.json" ]
   local n
-  n=$(sqlite_mem "SELECT json_array_length(json_extract(readfile('$TEST_PROJECT/.github/hooks/agmsg.json'), '\$.hooks.Stop'));")
+  n=$(sqlite_mem "SELECT json_array_length(json_extract(readfile('$(rf "$TEST_PROJECT/.github/hooks/agmsg.json")'), '\$.hooks.Stop'));")
   [ "$n" = "1" ]
 }
 
@@ -633,7 +633,7 @@ EOF
   bash "$SCRIPTS/delivery.sh" set turn copilot "$TEST_PROJECT"
   bash "$SCRIPTS/delivery.sh" set turn copilot "$TEST_PROJECT"
   local n
-  n=$(sqlite_mem "SELECT json_array_length(json_extract(readfile('$TEST_PROJECT/.github/hooks/agmsg.json'), '\$.hooks.Stop'));")
+  n=$(sqlite_mem "SELECT json_array_length(json_extract(readfile('$(rf "$TEST_PROJECT/.github/hooks/agmsg.json")'), '\$.hooks.Stop'));")
   [ "$n" = "1" ]
 }
 
@@ -911,7 +911,7 @@ JSON
   local hook_file="$TEST_PROJECT/.codex/hooks.json"
   [ -f "$hook_file" ]
   local cw
-  cw=$(sqlite_mem "SELECT json_extract(readfile('$hook_file'), '\$.hooks.Stop[0].hooks[0].commandWindows');")
+  cw=$(sqlite_mem "SELECT json_extract(readfile('$(rf "$hook_file")'), '\$.hooks.Stop[0].hooks[0].commandWindows');")
   [ -n "$cw" ]
   [[ "$cw" == *"Program Files\\Git\\bin\\bash.exe"* ]]
   [[ "$cw" == *"GIT_BASH"* ]]
@@ -926,7 +926,7 @@ JSON
   local hook_file="$TEST_PROJECT/.claude/settings.local.json"
   [ -f "$hook_file" ]
   local cw
-  cw=$(sqlite_mem "SELECT json_extract(readfile('$hook_file'), '\$.hooks.Stop[0].hooks[0].commandWindows');")
+  cw=$(sqlite_mem "SELECT json_extract(readfile('$(rf "$hook_file")'), '\$.hooks.Stop[0].hooks[0].commandWindows');")
   [ -z "$cw" ]
 }
 
@@ -1015,7 +1015,7 @@ skip_if_no_special_fs() {
 JSON
   run bash "$SCRIPTS/delivery.sh" set monitor claude-code "$TEST_PROJECT"
   [ "$status" -eq 0 ]
-  [ "$(sqlite_mem "SELECT json_valid(readfile('$(settings_file)'));")" = "1" ]
+  [ "$(sqlite_mem "SELECT json_valid(readfile('$(rf "$(settings_file)")'));")" = "1" ]
   has_session_start "$(settings_file)"
 }
 
@@ -1053,9 +1053,9 @@ JSON
 
   # Existing user permissions must be preserved across the rewrite.
   local first last allow_len
-  first=$(sqlite_mem "SELECT json_extract(readfile('$(settings_file)'), '\$.permissions.allow[0]');")
-  last=$(sqlite_mem  "SELECT json_extract(readfile('$(settings_file)'), '\$.permissions.allow[599]');")
-  allow_len=$(sqlite_mem "SELECT json_array_length(json_extract(readfile('$(settings_file)'), '\$.permissions.allow'));")
+  first=$(sqlite_mem "SELECT json_extract(readfile('$(rf "$(settings_file)")'), '\$.permissions.allow[0]');")
+  last=$(sqlite_mem  "SELECT json_extract(readfile('$(rf "$(settings_file)")'), '\$.permissions.allow[599]');")
+  allow_len=$(sqlite_mem "SELECT json_array_length(json_extract(readfile('$(rf "$(settings_file)")'), '\$.permissions.allow'));")
   [ "$first" = "Bash(mkdir:/tmp/agmsg-e2big-entry-0001)" ]
   [ "$last" = "Bash(mkdir:/tmp/agmsg-e2big-entry-0600)" ]
   [ "$allow_len" = "600" ]
@@ -1081,7 +1081,7 @@ JSON
   has_check_inbox "$(settings_file)"
 
   local allow_len
-  allow_len=$(sqlite_mem "SELECT json_array_length(json_extract(readfile('$(settings_file)'), '\$.permissions.allow'));")
+  allow_len=$(sqlite_mem "SELECT json_array_length(json_extract(readfile('$(rf "$(settings_file)")'), '\$.permissions.allow'));")
   [ "$allow_len" = "600" ]
 }
 
@@ -1106,7 +1106,7 @@ JSON
   local inflated
   inflated=$(sqlite_mem "
     SELECT json_set(
-      json_set(readfile('$(settings_file)'), '\$.permissions', json('{}')),
+      json_set(readfile('$(rf "$(settings_file)")'), '\$.permissions', json('{}')),
       '\$.permissions.allow', json('$allow_json')
     );
   ")
@@ -1116,7 +1116,7 @@ JSON
   [ "$status" -eq 0 ]
   ! has_check_inbox "$(settings_file)"
   local allow_len
-  allow_len=$(sqlite_mem "SELECT json_array_length(json_extract(readfile('$(settings_file)'), '\$.permissions.allow'));")
+  allow_len=$(sqlite_mem "SELECT json_array_length(json_extract(readfile('$(rf "$(settings_file)")'), '\$.permissions.allow'));")
   [ "$allow_len" = "600" ]
 }
 

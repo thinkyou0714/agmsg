@@ -58,6 +58,22 @@ skip_on_windows() {
 # This is the test-side mirror of scripts/lib/storage.sh's agmsg_sqlite_mem.
 sqlite_mem() { sqlite3 :memory: "$@" | tr -d '\r'; }
 
+# Resolve a file path for use inside a sqlite3 readfile('...') call in a test.
+# On native Windows, sqlite3 only reads a Windows path (C:\Users\...), not a Git
+# Bash POSIX path (/c/Users/... or /tmp/...): an unconverted path reads back as
+# empty, so the surrounding json_extract / json_valid sees nothing and the check
+# fails even though the script under test wrote a correct file. cygpath -w
+# converts it; a no-op off Windows (cygpath absent). The result is then single-
+# quote-escaped for the SQL string literal. Mirrors scripts/lib/storage.sh's
+# agmsg_sql_readfile_path — the production helper these tests are validating.
+rf() {
+  local p="$1"
+  if command -v cygpath >/dev/null 2>&1; then
+    p="$(cygpath -w "$p" 2>/dev/null || printf '%s' "$p")"
+  fi
+  printf '%s' "$p" | sed "s/'/''/g"
+}
+
 # Pin a fake-owned session_id under the given run/ directory so the lock
 # liveness check (which runs `kill -0` on cc-instance.<pid>) considers
 # <sid> alive for the duration of the bats process.
