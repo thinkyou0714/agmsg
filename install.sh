@@ -250,7 +250,7 @@ if [ "$UPDATE_ONLY" = true ]; then
   # shared SKILL.md; their dedicated copies are dropped separately below.)
   TPL_TYPE="codex"
   case "$AGENT_TYPE" in
-    gemini|antigravity|opencode) TPL_TYPE="$AGENT_TYPE" ;;
+    gemini|antigravity|opencode|hermes) TPL_TYPE="$AGENT_TYPE" ;;
   esac
   sed "s/__SKILL_NAME__/$SKILL_NAME/g" "$(agmsg_type_template_path "$TPL_TYPE")" > "$SKILL_DIR/SKILL.md"
   # Recursive copy so nested helper dirs (scripts/lib/, scripts/drivers/types/)
@@ -282,6 +282,12 @@ if [ "$UPDATE_ONLY" = true ]; then
   if [ -d "$HOME/.config/opencode" ]; then
     mkdir -p "$OPENCODE_SKILL_DIR"
     sed "s/__SKILL_NAME__/$SKILL_NAME/g" "$(agmsg_type_template_path opencode)" > "$OPENCODE_SKILL_DIR/SKILL.md"
+  fi
+  # Refresh / install the Hermes Agent skill (same reasoning as Copilot above).
+  HERMES_SKILL_DIR="$HOME/.hermes/skills/$SKILL_NAME"
+  if [ -d "$HOME/.hermes" ]; then
+    mkdir -p "$HERMES_SKILL_DIR"
+    sed "s/__SKILL_NAME__/$SKILL_NAME/g" "$(agmsg_type_template_path hermes)" > "$HERMES_SKILL_DIR/SKILL.md"
   fi
   cp "$SCRIPT_DIR/openai.yaml" "$SKILL_DIR/agents/openai.yaml" 2>/dev/null || true
   chmod +x "$SKILL_DIR/scripts/"*.sh
@@ -323,7 +329,7 @@ mkdir -p "$SKILL_DIR"/{scripts,types,db,agents}
 # codex template by default; gemini/antigravity/opencode get their own.
 TPL_TYPE="codex"
 case "$AGENT_TYPE" in
-  gemini|antigravity|opencode) TPL_TYPE="$AGENT_TYPE" ;;
+  gemini|antigravity|opencode|hermes) TPL_TYPE="$AGENT_TYPE" ;;
 esac
 sed "s/__SKILL_NAME__/$CMD_NAME/g" "$(agmsg_type_template_path "$TPL_TYPE")" > "$SKILL_DIR/SKILL.md"
 # Recursive copy so nested helper dirs (scripts/lib/, scripts/drivers/types/) ship
@@ -388,6 +394,18 @@ if [ -d "$HOME/.config/opencode" ]; then
   mkdir -p "$OPENCODE_SKILL_DIR"
   sed "s/__SKILL_NAME__/$CMD_NAME/g" "$(agmsg_type_template_path opencode)" > "$OPENCODE_SKILL_DIR/SKILL.md"
   echo "  + installed \$$CMD_NAME skill to ~/.config/opencode/skills/"
+fi
+
+# --- Install Hermes Agent skill ---
+# Hermes reads skills from ~/.hermes/skills/<name>/SKILL.md. Runtime scripts and
+# the shared SQLite store stay in ~/.agents/skills/<name>/ so Hermes shares the
+# same message floor as the other agents. Hermes has no automatic delivery hook
+# (manual inbox checks only), but the skill itself installs the same way.
+HERMES_SKILL_DIR="$HOME/.hermes/skills/$CMD_NAME"
+if [ -d "$HOME/.hermes" ]; then
+  mkdir -p "$HERMES_SKILL_DIR"
+  sed "s/__SKILL_NAME__/$CMD_NAME/g" "$(agmsg_type_template_path hermes)" > "$HERMES_SKILL_DIR/SKILL.md"
+  echo "  + installed /$CMD_NAME skill to ~/.hermes/skills/"
 fi
 
 # Codex sandbox writable_roots are configured by configure_codex_sandbox() at

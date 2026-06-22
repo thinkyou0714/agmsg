@@ -347,3 +347,9 @@ teardown() {
   [ "$status" -eq 0 ]
   [ -f "$TEST_SKILL_DIR/teams/テストチーム/config.json" ]
 }
+
+@test "join: accepts hermes" {
+  run bash "$SCRIPTS/join.sh" myteam alice hermes /tmp/proj
+  [ "$status" -eq 0 ]
+  [ -f "$TEST_SKILL_DIR/teams/myteam/config.json" ]
+}

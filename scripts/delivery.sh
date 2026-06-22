@@ -360,7 +360,14 @@ do_set() {
       # Type-specific teardown via the plug (default: stop this project's
       # watchers; codex stops its bridge instead).
       agmsg_delivery_on_disable "$TYPE" "$PROJECT"
-      emit_stop_directive
+      # Only emit the in-session watcher-stop directive for types that actually
+      # have an automatic delivery mode to stop. A manual-only type
+      # (delivery_modes=off, e.g. hermes) has no Monitor/watcher, so the
+      # directive would be noise — and a stray TaskStop could disturb an
+      # unrelated agent's watcher. Data-driven, so no per-type branch here.
+      case " $SUPPORTED_MODES " in
+        *" monitor "*|*" turn "*|*" both "*) emit_stop_directive ;;
+      esac
       ;;
   esac
 }

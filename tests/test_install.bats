@@ -457,3 +457,54 @@ PY
   fi
 }
 
+
+# --- hermes Agent skill (~/.hermes/skills/<name>/SKILL.md) ---
+
+@test "install: drops a Hermes skill when ~/.hermes exists" {
+  mkdir -p "$FAKE_HOME/.hermes"
+  HOME="$FAKE_HOME" bash "$REPO_ROOT/install.sh" --cmd agmsg
+  local hermes_skill="$FAKE_HOME/.hermes/skills/agmsg/SKILL.md"
+  [ -f "$hermes_skill" ]
+  grep -q "whoami.sh \"\$(pwd)\" hermes" "$hermes_skill"
+  grep -q "^name: agmsg" "$hermes_skill"
+  grep -q "~/.agents/skills/agmsg/scripts" "$hermes_skill"
+}
+
+@test "install: custom command name is substituted in Hermes skill" {
+  mkdir -p "$FAKE_HOME/.hermes"
+  HOME="$FAKE_HOME" bash "$REPO_ROOT/install.sh" --cmd msg
+  local hermes_skill="$FAKE_HOME/.hermes/skills/msg/SKILL.md"
+  [ -f "$hermes_skill" ]
+  grep -q "^name: msg" "$hermes_skill"
+  grep -q "~/.agents/skills/msg/scripts" "$hermes_skill"
+  grep -q "You can now use \`/msg\`" "$hermes_skill"
+  ! grep -q "__SKILL_NAME__" "$hermes_skill"
+}
+
+@test "install: --agent-type hermes makes shared SKILL.md Hermes-typed" {
+  HOME="$FAKE_HOME" bash "$REPO_ROOT/install.sh" --cmd agmsg --agent-type hermes
+  grep -q "whoami.sh \"\$(pwd)\" hermes" "$SK/SKILL.md"
+  ! grep -q "whoami.sh \"\$(pwd)\" codex" "$SK/SKILL.md"
+  ! grep -q "whoami.sh \"\$(pwd)\" gemini" "$SK/SKILL.md"
+  ! grep -q "whoami.sh \"\$(pwd)\" antigravity" "$SK/SKILL.md"
+}
+
+@test "install --update: refreshes the Hermes skill if it was previously installed" {
+  mkdir -p "$FAKE_HOME/.hermes"
+  HOME="$FAKE_HOME" bash "$REPO_ROOT/install.sh" --cmd agmsg
+  local hermes_skill="$FAKE_HOME/.hermes/skills/agmsg/SKILL.md"
+  [ -f "$hermes_skill" ]
+  echo "tampered" > "$hermes_skill"
+  HOME="$FAKE_HOME" bash "$REPO_ROOT/install.sh" --update
+  ! grep -q "^tampered$" "$hermes_skill"
+  grep -q "whoami.sh \"\$(pwd)\" hermes" "$hermes_skill"
+}
+
+@test "install --update: installs Hermes skill for upgraders without prior skill" {
+  HOME="$FAKE_HOME" bash "$REPO_ROOT/install.sh" --cmd agmsg
+  [ ! -d "$FAKE_HOME/.hermes/skills/agmsg" ]
+  mkdir -p "$FAKE_HOME/.hermes"
+  HOME="$FAKE_HOME" bash "$REPO_ROOT/install.sh" --update
+  [ -f "$FAKE_HOME/.hermes/skills/agmsg/SKILL.md" ]
+  grep -q "whoami.sh \"\$(pwd)\" hermes" "$FAKE_HOME/.hermes/skills/agmsg/SKILL.md"
+}

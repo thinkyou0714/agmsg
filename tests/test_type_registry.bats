@@ -29,11 +29,11 @@ write_node_launcher_fixtures() {
   printf '// stub node launcher fixture\n' > "$nd/nodetype-launcher.mjs"
 }
 
-@test "type-registry: known_types lists the six built-ins" {
+@test "type-registry: known_types lists the seven built-ins" {
   run env -i PATH="$PATH" bash -c \
     "source '$SCRIPTS/lib/type-registry.sh'; agmsg_known_types | sort -u | paste -sd, -"
   [ "$status" -eq 0 ]
-  [ "$output" = "antigravity,claude-code,codex,copilot,gemini,opencode" ]
+  [ "$output" = "antigravity,claude-code,codex,copilot,gemini,hermes,opencode" ]
 }
 
 @test "type-registry: is_known_type accepts a built-in and rejects a bogus type" {
@@ -64,7 +64,7 @@ write_node_launcher_fixtures() {
   [ "$status" -ne 0 ]
 }
 
-@test "type-registry: spawnable set is exactly claude-code and codex" {
+@test "type-registry: spawnable set is exactly claude-code, codex and hermes" {
   run env -i PATH="$PATH" bash -c \
     "source '$SCRIPTS/lib/type-registry.sh'
      while IFS= read -r t; do
@@ -72,7 +72,7 @@ write_node_launcher_fixtures() {
        [ \"\$(agmsg_type_get \"\$t\" spawnable)\" = yes ] && echo \"\$t\"
      done <<< \"\$(agmsg_known_types | sort -u)\" | paste -sd, -"
   [ "$status" -eq 0 ]
-  [ "$output" = "claude-code,codex" ]
+  [ "$output" = "claude-code,codex,hermes" ]
 }
 
 @test "type-registry: detection manifests carry the expected env / proc keys" {
@@ -159,7 +159,7 @@ write_node_launcher_fixtures() {
   # join.sh and spawn.sh must be fully data-driven; whoami.sh is allowed only its
   # default fallback (echo "claude-code"). Any other type literal on a non-comment
   # line is a re-introduced per-type branch.
-  local types='claude-code|codex|gemini|antigravity|copilot|opencode'
+  local types='claude-code|codex|gemini|antigravity|copilot|opencode|hermes'
   for f in join.sh spawn.sh; do
     run bash -c "sed 's/#.*//' '$SCRIPTS/$f' | grep -nE '$types' || true"
     [ -z "$output" ] || { echo "hardcoded type literal in $f:"; echo "$output"; false; }
