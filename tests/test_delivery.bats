@@ -1179,6 +1179,64 @@ JSON
   [ "$count" -eq 1 ]
 }
 
+# --- cursor agent tests (#131) ---
+
+@test "cursor is accepted as an agent type (turn mode)" {
+  run bash "$SCRIPTS/delivery.sh" set turn cursor "$TEST_PROJECT"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "Delivery mode set to 'turn'" ]]
+  [ -f "$TEST_PROJECT/.cursor/rules/agmsg.mdc" ]
+  grep -q "check-inbox.sh" "$TEST_PROJECT/.cursor/rules/agmsg.mdc"
+}
+
+@test "cursor rule file is an always-apply .mdc (Cursor CLI auto-load)" {
+  bash "$SCRIPTS/delivery.sh" set turn cursor "$TEST_PROJECT" >/dev/null
+  # First non-empty line opens the frontmatter; alwaysApply must be declared so
+  # the Cursor CLI applies the rule on every turn.
+  [ "$(head -1 "$TEST_PROJECT/.cursor/rules/agmsg.mdc")" = "---" ]
+  grep -q "alwaysApply: true" "$TEST_PROJECT/.cursor/rules/agmsg.mdc"
+}
+
+@test "cursor supports off mode: removes rule file" {
+  bash "$SCRIPTS/delivery.sh" set turn cursor "$TEST_PROJECT"
+  [ -f "$TEST_PROJECT/.cursor/rules/agmsg.mdc" ]
+  run bash "$SCRIPTS/delivery.sh" set off cursor "$TEST_PROJECT"
+  [ "$status" -eq 0 ]
+  [ ! -f "$TEST_PROJECT/.cursor/rules/agmsg.mdc" ]
+}
+
+@test "cursor rejects monitor mode" {
+  run bash "$SCRIPTS/delivery.sh" set monitor cursor "$TEST_PROJECT"
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "not supported" ]]
+  [ ! -f "$TEST_PROJECT/.cursor/rules/agmsg.mdc" ]
+}
+
+@test "cursor rejects both mode" {
+  run bash "$SCRIPTS/delivery.sh" set both cursor "$TEST_PROJECT"
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "not supported" ]]
+  [ ! -f "$TEST_PROJECT/.cursor/rules/agmsg.mdc" ]
+}
+
+@test "cursor rejects monitor: does NOT delete an existing turn rule" {
+  bash "$SCRIPTS/delivery.sh" set turn cursor "$TEST_PROJECT" >/dev/null
+  [ -f "$TEST_PROJECT/.cursor/rules/agmsg.mdc" ]
+  run bash "$SCRIPTS/delivery.sh" set monitor cursor "$TEST_PROJECT"
+  [ "$status" -ne 0 ]
+  [ -f "$TEST_PROJECT/.cursor/rules/agmsg.mdc" ]
+}
+
+@test "cursor set turn: idempotent across repeats" {
+  bash "$SCRIPTS/delivery.sh" set turn cursor "$TEST_PROJECT"
+  bash "$SCRIPTS/delivery.sh" set turn cursor "$TEST_PROJECT"
+  bash "$SCRIPTS/delivery.sh" set turn cursor "$TEST_PROJECT"
+  [ -f "$TEST_PROJECT/.cursor/rules/agmsg.mdc" ]
+  local count
+  count=$(grep -c "check-inbox.sh" "$TEST_PROJECT/.cursor/rules/agmsg.mdc")
+  [ "$count" -eq 1 ]
+}
+
 # --- Codex monitor bridge (#41) ---
 @test "session-start.sh for codex starts bridge when monitor launcher env is present" {
   bash "$SCRIPTS/join.sh" team alice codex "$TEST_PROJECT" >/dev/null

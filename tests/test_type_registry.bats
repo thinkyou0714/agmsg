@@ -29,11 +29,11 @@ write_node_launcher_fixtures() {
   printf '// stub node launcher fixture\n' > "$nd/nodetype-launcher.mjs"
 }
 
-@test "type-registry: known_types lists the seven built-ins" {
+@test "type-registry: known_types lists the eight built-ins" {
   run env -i PATH="$PATH" bash -c \
     "source '$SCRIPTS/lib/type-registry.sh'; agmsg_known_types | sort -u | paste -sd, -"
   [ "$status" -eq 0 ]
-  [ "$output" = "antigravity,claude-code,codex,copilot,gemini,hermes,opencode" ]
+  [ "$output" = "antigravity,claude-code,codex,copilot,cursor,gemini,hermes,opencode" ]
 }
 
 @test "type-registry: is_known_type accepts a built-in and rejects a bogus type" {
