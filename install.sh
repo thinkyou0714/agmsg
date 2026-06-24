@@ -232,6 +232,8 @@ if [ "$UPDATE_ONLY" = true ]; then
       AGENT_TYPE="antigravity"
     elif grep -q "whoami.sh.*gemini" "$SKILL_DIR/SKILL.md" 2>/dev/null; then
       AGENT_TYPE="gemini"
+    elif grep -q "whoami.sh.*grok-build" "$SKILL_DIR/SKILL.md" 2>/dev/null; then
+      AGENT_TYPE="grok-build"
     else
       AGENT_TYPE="codex"
     fi

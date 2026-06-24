@@ -5,17 +5,18 @@
 # delivery_modes="turn off"; delivery.sh's central gate rejects monitor/both
 # before this runs (and before any file is touched). Modeled on the copilot
 # plug: a fully agmsg-owned hook file we write/remove wholesale (not a merge
-# into a shared settings file). The Stop hook runs check-inbox.sh, which reads
-# `session_id` from the hook input JSON on stdin — Grok Build emits the same
-# Claude-Code-shaped event, so no env remap is needed here. Uses
-# resolve_hooks_file + SKILL_DIR from delivery.sh's sourced context.
+# into a shared settings file). The Stop hook runs check-inbox.sh between turns.
+# Uses resolve_hooks_file + SKILL_DIR from delivery.sh's sourced context.
 #
-# C-GATED (#214): the exact hook filename + JSON schema below are the assumed
-# Claude-Code shape (xAI's official schema page was not directly fetchable). Do
-# NOT treat this as final — confirm against a real install with `grok inspect`
-# and adjust the file path (manifest hooks_file=) and the JSON keys if they
-# differ. Everything else in this type (manifest, template, whoami detect,
-# install SKILL placement, join) is schema-independent and stands as-is.
+# Schema confirmed against a real Grok Build install (xAI local docs
+# ~/.grok/docs/user-guide/10-hooks.md): the hook file is the Claude-Code-shaped
+# nested form { "hooks": { "Stop": [ { "hooks": [ { "type":"command",
+# "command":<abs>, "timeout":N } ] } ] } } at <project>/.grok/hooks/agmsg.json
+# (no top-level "version"). Grok injects GROK_SESSION_ID/CLAUDE_PROJECT_DIR into
+# every hook and emits the session id on stdin as camelCase "sessionId"; the
+# shared session-start.sh / check-inbox.sh resolve that (snake_case session_id ->
+# camelCase sessionId -> $GROK_SESSION_ID) so no per-type remap is needed here.
+# `command` is the absolute check-inbox.sh path ($SKILL_DIR is absolute).
 agmsg_delivery_apply() {
   local type="$1"
   local project="$2"
@@ -32,17 +33,20 @@ agmsg_delivery_apply() {
     local cmd="'$SKILL_DIR/scripts/check-inbox.sh' '$type' '$project'"
     local cmd_json
     cmd_json=$(agmsg_sqlite_mem "SELECT json_quote('$(printf '%s' "$cmd" | sed "s/'/''/g")');")
-    # Stop trigger (PascalCase) so the input payload's snake_case session_id
-    # field matches what check-inbox.sh already parses.
+    # Stop = "agent turn ends" (lifecycle event, no matcher). Nested Claude shape:
+    # Stop[].hooks[] each { type:"command", command:<abs>, timeout:<sec> }.
     cat <<EOF > "$hooks_file"
 {
-  "version": 1,
   "hooks": {
     "Stop": [
       {
-        "type": "command",
-        "bash": $cmd_json,
-        "timeoutSec": 30
+        "hooks": [
+          {
+            "type": "command",
+            "command": $cmd_json,
+            "timeout": 30
+          }
+        ]
       }
     ]
   }
@@ -50,3 +54,9 @@ agmsg_delivery_apply() {
 EOF
   fi
 }
+
+# Status derives the mode from the hook file's existence, not by parsing the
+# Claude/Codex nested-settings shape the default status reader expects — our
+# hook file is the dedicated agmsg-owned form (present => turn, absent => off).
+# Same override copilot uses. Schema-independent: only checks file presence.
+agmsg_delivery_status() { rulefile_status "$@"; }

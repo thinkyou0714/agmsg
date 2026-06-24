@@ -40,11 +40,17 @@ if echo "$INPUT" | grep -q '"stop_hook_active"[[:space:]]*:[[:space:]]*true' 2>/
 fi
 
 # Defer to the monitor watcher when one is alive for this session.
-# Avoids double-delivery when delivery.mode = both. session_id is sent in
-# the hook input JSON for Stop events.
+# Avoids double-delivery when delivery.mode = both. The session id field name
+# differs by vendor: Claude Code emits snake_case "session_id"; Grok Build (and
+# Cursor) emit camelCase "sessionId". Try snake first (claude-code unaffected),
+# then camel, then the GROK_SESSION_ID env Grok injects into every hook.
 SESSION_ID=$(printf '%s' "$INPUT" \
   | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
   | head -1)
+[ -z "$SESSION_ID" ] && SESSION_ID=$(printf '%s' "$INPUT" \
+  | sed -n 's/.*"sessionId"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+  | head -1)
+[ -z "$SESSION_ID" ] && SESSION_ID="${GROK_SESSION_ID:-}"
 if [ -n "$SESSION_ID" ]; then
   # The monitor watcher keys its pidfile (and its actas owner, below) on the
   # per-process instance id (#93), not the bare session_id. Normalize to the

@@ -64,15 +64,22 @@ else
   agmsg_session_start_default
 fi
 
-# Read hook input JSON from stdin. session_id field is sent for SessionStart.
+# Read hook input JSON from stdin. The session id field name differs by vendor:
+# Claude Code emits snake_case "session_id"; Grok Build (and Cursor) emit
+# camelCase "sessionId". Try snake first (claude-code unaffected), then camel,
+# then the GROK_SESSION_ID env Grok injects into every hook.
 INPUT=$(cat 2>/dev/null || true)
 SESSION_ID=""
 if [ -n "$INPUT" ]; then
   SESSION_ID=$(printf '%s' "$INPUT" \
     | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
     | head -1)
+  [ -z "$SESSION_ID" ] && SESSION_ID=$(printf '%s' "$INPUT" \
+    | sed -n 's/.*"sessionId"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+    | head -1)
 fi
-# Fallback so the instruction is still actionable even outside CC's hook flow.
+[ -z "$SESSION_ID" ] && SESSION_ID="${GROK_SESSION_ID:-}"
+# Fallback so the instruction is still actionable even outside a hook flow.
 [ -z "$SESSION_ID" ] && SESSION_ID="unknown-$$"
 
 mkdir -p "$RUN_DIR" 2>/dev/null || true

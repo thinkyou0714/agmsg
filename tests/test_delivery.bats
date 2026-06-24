@@ -359,6 +359,47 @@ JSON
   [ ! -f "$TEST_SKILL_DIR/run/cc-instance.$dead_pid" ]
 }
 
+# --- session-id resolution: vendor field-name differences (grok/cursor) ---
+# Grok Build emits the session id on stdin as camelCase "sessionId" and injects
+# GROK_SESSION_ID into every hook; Claude uses snake_case "session_id". The
+# shared resolver tries snake -> camel -> $GROK_SESSION_ID. The Monitor
+# directive echoes the resolved id as the watch.sh command's session arg, so we
+# assert through that. (Exercised via claude-code since the resolver is shared.)
+
+@test "session-start: resolves camelCase sessionId from stdin (grok/cursor field)" {
+  env AGMSG_RESOLVE_PROJECT=0 bash "$SCRIPTS/join.sh" team alice claude-code "$TEST_PROJECT" >/dev/null
+  bash "$SCRIPTS/delivery.sh" set monitor claude-code "$TEST_PROJECT" >/dev/null
+  run env AGMSG_RESOLVE_PROJECT=0 bash "$SCRIPTS/session-start.sh" claude-code "$TEST_PROJECT" <<<'{"sessionId":"grokCamelSID"}'
+  [ "$status" -eq 0 ]
+  local cmdline
+  cmdline=$(printf '%s\n' "$output" | sed -n 's/^[[:space:]]*command: //p')
+  eval "set -- $cmdline"
+  [[ "$2" =~ grokCamelSID ]]
+}
+
+@test "session-start: falls back to GROK_SESSION_ID env when stdin lacks a session id" {
+  env AGMSG_RESOLVE_PROJECT=0 bash "$SCRIPTS/join.sh" team alice claude-code "$TEST_PROJECT" >/dev/null
+  bash "$SCRIPTS/delivery.sh" set monitor claude-code "$TEST_PROJECT" >/dev/null
+  run env AGMSG_RESOLVE_PROJECT=0 GROK_SESSION_ID=grokEnvSID bash "$SCRIPTS/session-start.sh" claude-code "$TEST_PROJECT" <<<'{}'
+  [ "$status" -eq 0 ]
+  local cmdline
+  cmdline=$(printf '%s\n' "$output" | sed -n 's/^[[:space:]]*command: //p')
+  eval "set -- $cmdline"
+  [[ "$2" =~ grokEnvSID ]]
+}
+
+@test "session-start: snake_case session_id still wins over camelCase (claude-code unaffected)" {
+  env AGMSG_RESOLVE_PROJECT=0 bash "$SCRIPTS/join.sh" team alice claude-code "$TEST_PROJECT" >/dev/null
+  bash "$SCRIPTS/delivery.sh" set monitor claude-code "$TEST_PROJECT" >/dev/null
+  run env AGMSG_RESOLVE_PROJECT=0 bash "$SCRIPTS/session-start.sh" claude-code "$TEST_PROJECT" <<<'{"session_id":"snakeWins","sessionId":"camelLoses"}'
+  [ "$status" -eq 0 ]
+  local cmdline
+  cmdline=$(printf '%s\n' "$output" | sed -n 's/^[[:space:]]*command: //p')
+  eval "set -- $cmdline"
+  [[ "$2" =~ snakeWins ]]
+  [[ ! "$2" =~ camelLoses ]]
+}
+
 # --- SessionEnd hook integration ---
 
 has_session_end() {
@@ -1457,22 +1498,21 @@ JSON
 }
 
 # --- grok-build (turn|off via a dedicated .grok/hooks/agmsg.json) ---
-# C-GATED (#214): the hook file path + JSON schema asserted here are the assumed
-# Claude-Code shape (xAI's official schema page was not directly fetchable). If
-# `grok inspect` on a real install shows a different filename/keys, update the
-# manifest hooks_file=, the _delivery.sh writer, and these assertions together.
+# Schema confirmed against a real Grok Build install (xAI local docs
+# ~/.grok/docs/user-guide/10-hooks.md): nested Claude shape
+# { "hooks": { "Stop": [ { "hooks": [ { "type":"command", "command":<abs>,
+# "timeout":N } ] } ] } }, no top-level "version".
 
-@test "delivery set turn (grok-build): writes .grok/hooks/agmsg.json with version + Stop entry" {
+@test "delivery set turn (grok-build): writes .grok/hooks/agmsg.json with nested Stop entry" {
   run bash "$SCRIPTS/delivery.sh" set turn grok-build "$TEST_PROJECT"
   [ "$status" -eq 0 ]
   [[ "$output" =~ "Delivery mode set to 'turn'" ]]
   local hook_file="$TEST_PROJECT/.grok/hooks/agmsg.json"
   [ -f "$hook_file" ]
-  local v
-  v=$(sqlite_mem "SELECT json_extract(readfile('$(rf "$hook_file")'), '\$.version');")
-  [ "$v" = "1" ]
-  local cmd
-  cmd=$(sqlite_mem "SELECT json_extract(readfile('$(rf "$hook_file")'), '\$.hooks.Stop[0].bash');")
+  local cmd typ
+  cmd=$(sqlite_mem "SELECT json_extract(readfile('$(rf "$hook_file")'), '\$.hooks.Stop[0].hooks[0].command');")
+  typ=$(sqlite_mem "SELECT json_extract(readfile('$(rf "$hook_file")'), '\$.hooks.Stop[0].hooks[0].type');")
+  [ "$typ" = "command" ]
   [[ "$cmd" =~ "check-inbox.sh" ]]
   [[ "$cmd" =~ "grok-build" ]]
 }
@@ -1497,4 +1537,13 @@ JSON
   run bash "$SCRIPTS/delivery.sh" set both grok-build "$TEST_PROJECT"
   [ "$status" -ne 0 ]
   [ -f "$TEST_PROJECT/.grok/hooks/agmsg.json" ]
+}
+
+@test "delivery status (grok-build): derives mode from hook file existence" {
+  run bash "$SCRIPTS/delivery.sh" status grok-build "$TEST_PROJECT"
+  [[ "$output" =~ "mode: off" ]]
+
+  bash "$SCRIPTS/delivery.sh" set turn grok-build "$TEST_PROJECT"
+  run bash "$SCRIPTS/delivery.sh" status grok-build "$TEST_PROJECT"
+  [[ "$output" =~ "mode: turn" ]]
 }
