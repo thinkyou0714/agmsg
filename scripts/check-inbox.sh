@@ -62,7 +62,10 @@ fi
 
 # Identify agent and teams
 WHOAMI=$("$SCRIPT_DIR/whoami.sh" "$PROJECT" "$TYPE")
-if echo "$WHOAMI" | grep -q "not_joined=true"; then
+# suggest=true means this identity is registered only under a DIFFERENT
+# project, so it is not joined here -> deliver nothing (mirror not_joined).
+# Without this the else-branch extracts "agents=" as the agent name.
+if echo "$WHOAMI" | grep -Eq "not_joined=true|suggest=true"; then
   exit 0
 fi
 
@@ -70,7 +73,8 @@ fi
 if echo "$WHOAMI" | grep -q "multiple=true"; then
   AGENT=$(echo "$WHOAMI" | sed -n 's/.*agents=\([^,]*\).*/\1/p')
 else
-  AGENT=$(echo "$WHOAMI" | sed -n 's/.*agent=\([^ ]*\).*/\1/p')
+  # Anchor on a leading "agent=" so "agents=" (multiple/suggest) cannot match.
+  AGENT=$(echo "$WHOAMI" | sed -n 's/^agent=\([^ ]*\).*/\1/p')
 fi
 TEAMS=$(echo "$WHOAMI" | sed -n 's/.*teams=\([^ ]*\).*/\1/p')
 
