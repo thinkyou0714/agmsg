@@ -1455,3 +1455,46 @@ JSON
   kill "$watch_pid" 2>/dev/null || true
   wait 2>/dev/null || true
 }
+
+# --- grok-build (turn|off via a dedicated .grok/hooks/agmsg.json) ---
+# C-GATED (#214): the hook file path + JSON schema asserted here are the assumed
+# Claude-Code shape (xAI's official schema page was not directly fetchable). If
+# `grok inspect` on a real install shows a different filename/keys, update the
+# manifest hooks_file=, the _delivery.sh writer, and these assertions together.
+
+@test "delivery set turn (grok-build): writes .grok/hooks/agmsg.json with version + Stop entry" {
+  run bash "$SCRIPTS/delivery.sh" set turn grok-build "$TEST_PROJECT"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "Delivery mode set to 'turn'" ]]
+  local hook_file="$TEST_PROJECT/.grok/hooks/agmsg.json"
+  [ -f "$hook_file" ]
+  local v
+  v=$(sqlite_mem "SELECT json_extract(readfile('$(rf "$hook_file")'), '\$.version');")
+  [ "$v" = "1" ]
+  local cmd
+  cmd=$(sqlite_mem "SELECT json_extract(readfile('$(rf "$hook_file")'), '\$.hooks.Stop[0].bash');")
+  [[ "$cmd" =~ "check-inbox.sh" ]]
+  [[ "$cmd" =~ "grok-build" ]]
+}
+
+@test "delivery set off (grok-build): removes the hook file" {
+  bash "$SCRIPTS/delivery.sh" set turn grok-build "$TEST_PROJECT"
+  [ -f "$TEST_PROJECT/.grok/hooks/agmsg.json" ]
+  run bash "$SCRIPTS/delivery.sh" set off grok-build "$TEST_PROJECT"
+  [ "$status" -eq 0 ]
+  [ ! -f "$TEST_PROJECT/.grok/hooks/agmsg.json" ]
+}
+
+@test "delivery set monitor (grok-build): rejected; no hook file written" {
+  run bash "$SCRIPTS/delivery.sh" set monitor grok-build "$TEST_PROJECT"
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "not supported" ]]
+  [ ! -f "$TEST_PROJECT/.grok/hooks/agmsg.json" ]
+}
+
+@test "delivery set both (grok-build): does NOT delete an existing turn hook" {
+  bash "$SCRIPTS/delivery.sh" set turn grok-build "$TEST_PROJECT" >/dev/null
+  run bash "$SCRIPTS/delivery.sh" set both grok-build "$TEST_PROJECT"
+  [ "$status" -ne 0 ]
+  [ -f "$TEST_PROJECT/.grok/hooks/agmsg.json" ]
+}

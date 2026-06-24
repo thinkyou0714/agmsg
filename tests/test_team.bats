@@ -385,3 +385,9 @@ teardown() {
   [ "$status" -eq 0 ]
   [ -f "$TEST_SKILL_DIR/teams/myteam/config.json" ]
 }
+
+@test "join: accepts grok-build" {
+  run bash "$SCRIPTS/join.sh" myteam alice grok-build /tmp/proj
+  [ "$status" -eq 0 ]
+  [ -f "$TEST_SKILL_DIR/teams/myteam/config.json" ]
+}
