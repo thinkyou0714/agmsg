@@ -14,7 +14,11 @@ DB="$(agmsg_db_path)"
 
 [ -f "$DB" ] || bash "$SCRIPT_DIR/internal/init-db.sh" >/dev/null
 
-INSERT="INSERT INTO messages (team, from_agent, to_agent, body) VALUES ('$TEAM', '$FROM', '$TO', '$(echo "$BODY" | sed "s/'/''/g")');"
+# Escape EVERY interpolated value as a SQL string literal, not just body: a
+# team/agent name containing a single quote would otherwise break the INSERT
+# (correctness) or change its meaning (injection surface).
+_agmsg_sqlesc() { printf %s "$1" | sed "s/'/''/g"; }
+INSERT="INSERT INTO messages (team, from_agent, to_agent, body) VALUES ('$(_agmsg_sqlesc "$TEAM")', '$(_agmsg_sqlesc "$FROM")', '$(_agmsg_sqlesc "$TO")', '$(_agmsg_sqlesc "$BODY")');"
 
 # Retry once after ensuring the schema. Under a concurrent first-write fan-out
 # (leader → N members against a fresh/override store), one process can see the
