@@ -11,6 +11,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # Reject team names that would escape teams/ as a path segment (#140).
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/validate.sh"
+# storage.sh provides agmsg_sql_escape for the config interpolation below.
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/storage.sh"
 agmsg_validate_team_name "$TEAM" || exit 1
 
 CONFIG="$SCRIPT_DIR/../teams/$TEAM/config.json"
@@ -34,7 +37,7 @@ while IFS='	' read -r name types project registrations; do
 # tr -d '\r': sqlite3.exe on Windows emits CRLF rows; the trailing CR would make
 # the `registrations` field "N\r" and trip the integer test in the loop (#130).
 done < <(sqlite3 -separator '	' :memory: \
-  ".param set :json '$(sed "s/'/''/g" "$CONFIG")'" \
+  ".param set :json '$(agmsg_sql_escape "$(cat "$CONFIG")")'" \
   "WITH agents AS (
      SELECT
        key AS name,

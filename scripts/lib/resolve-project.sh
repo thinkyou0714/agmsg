@@ -165,7 +165,7 @@ agmsg_registered_projects() {
   # `.param set` dot-command — the sqlite3 shell tokenizer doesn't honour SQL ''
   # escaping, so a config value with a single quote breaks the bind (#112). The
   # path and type are interpolated as SQL string literals with '' doubling.
-  type_sql=$(printf '%s' "$type" | sed "s/'/''/g")
+  type_sql=$(agmsg_sql_escape "$type")
   for config_file in "$teams_dir"/*/config.json; do
     [ -f "$config_file" ] || continue
     cfg_sql=$(agmsg_sql_readfile_path "$config_file")

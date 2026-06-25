@@ -26,6 +26,8 @@ RUN_DIR="$SKILL_DIR/run"
 source "$SCRIPT_DIR/lib/actas-lock.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/resolve-project.sh"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/hook-input.sh"
 
 # Drop project markers (#92) whose agent process has exited. Liveness-based, so
 # a session that persists across /clear keeps its marker until the process dies.
@@ -34,9 +36,7 @@ agmsg_marker_gc_stale 2>/dev/null || true
 INPUT=$(cat 2>/dev/null || true)
 SESSION_ID=""
 if [ -n "$INPUT" ]; then
-  SESSION_ID=$(printf '%s' "$INPUT" \
-    | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
-    | head -1)
+  SESSION_ID=$(agmsg_hook_json_field "$INPUT" session_id)
 fi
 [ -z "$SESSION_ID" ] && exit 0
 

@@ -59,11 +59,11 @@ fi
 
 # --- Add or extend agent registrations ---
 CONFIG_SQL=$(agmsg_sql_readfile_path "$TEAM_CONFIG")
-AGENT_ID_SQL=$(printf '%s' "$AGENT_ID" | sed "s/'/''/g")
-AGENT_TYPE_SQL=$(printf '%s' "$AGENT_TYPE" | sed "s/'/''/g")
-PROJECT_SQL=$(printf '%s' "$PROJECT_PATH" | sed "s/'/''/g")
+AGENT_ID_SQL=$(agmsg_sql_escape "$AGENT_ID")
+AGENT_TYPE_SQL=$(agmsg_sql_escape "$AGENT_TYPE")
+PROJECT_SQL=$(agmsg_sql_escape "$PROJECT_PATH")
 REGISTRATION=$(sqlite3 :memory: "SELECT json_object('type', '$AGENT_TYPE_SQL', 'project', '$PROJECT_SQL');")
-REGISTRATION_ESCAPED=$(printf '%s' "$REGISTRATION" | sed "s/'/''/g")
+REGISTRATION_ESCAPED=$(agmsg_sql_escape "$REGISTRATION")
 
 EXISTING=$(agmsg_sqlite_mem "
   WITH cfg AS (SELECT CAST(readfile('$CONFIG_SQL') AS TEXT) AS json)
@@ -75,7 +75,7 @@ EXISTING=$(agmsg_sqlite_mem "
 if [ -z "$EXISTING" ] || [ "$EXISTING" = "null" ]; then
   AGENT_OBJ=$(sqlite3 :memory: "SELECT json_object('registrations', json_array(json('$REGISTRATION_ESCAPED')));")
 else
-  EXISTING_ESCAPED=$(printf '%s' "$EXISTING" | sed "s/'/''/g")
+  EXISTING_ESCAPED=$(agmsg_sql_escape "$EXISTING")
   NORMALIZED=$(agmsg_sqlite_mem "
     WITH agent(a) AS (SELECT '$EXISTING_ESCAPED')
     SELECT CASE
@@ -90,7 +90,7 @@ else
     END
     FROM agent;
   ")
-  NORMALIZED_ESCAPED=$(printf '%s' "$NORMALIZED" | sed "s/'/''/g")
+  NORMALIZED_ESCAPED=$(agmsg_sql_escape "$NORMALIZED")
 
   HAS_REGISTRATION=$(agmsg_sqlite_mem "
     SELECT EXISTS(
@@ -114,7 +114,7 @@ else
   fi
 fi
 
-AGENT_OBJ_ESCAPED=$(printf '%s' "$AGENT_OBJ" | sed "s/'/''/g")
+AGENT_OBJ_ESCAPED=$(agmsg_sql_escape "$AGENT_OBJ")
 UPDATED=$(agmsg_sqlite_mem \
   "WITH cfg AS (SELECT CAST(readfile('$CONFIG_SQL') AS TEXT) AS json)
   SELECT json_set(

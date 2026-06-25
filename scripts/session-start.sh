@@ -42,6 +42,8 @@ source "$SCRIPT_DIR/lib/hash.sh"
 source "$SCRIPT_DIR/lib/storage.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/type-registry.sh"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/hook-input.sh"
 
 # Identity sanity check — no point launching a watcher with an empty pair set.
 PAIRS=$("$SCRIPT_DIR/identities.sh" "$PROJECT" "$TYPE" 2>/dev/null || true)
@@ -68,9 +70,7 @@ fi
 INPUT=$(cat 2>/dev/null || true)
 SESSION_ID=""
 if [ -n "$INPUT" ]; then
-  SESSION_ID=$(printf '%s' "$INPUT" \
-    | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
-    | head -1)
+  SESSION_ID=$(agmsg_hook_json_field "$INPUT" session_id)
 fi
 # Fallback so the instruction is still actionable even outside CC's hook flow.
 [ -z "$SESSION_ID" ] && SESSION_ID="unknown-$$"

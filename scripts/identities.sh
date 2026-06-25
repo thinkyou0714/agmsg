@@ -15,13 +15,15 @@ set -euo pipefail
 
 PROJECT_PATH="${1:?Usage: identities.sh <project_path> <agent_type>}"
 AGENT_TYPE="${2:?Missing agent_type}"
-PROJECT_SQL=$(printf '%s' "$PROJECT_PATH" | sed "s/'/''/g")
-AGENT_TYPE_SQL=$(printf '%s' "$AGENT_TYPE" | sed "s/'/''/g")
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TEAMS_DIR="$SCRIPT_DIR/../teams"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/storage.sh"
+
+# After storage.sh is sourced so agmsg_sql_escape is defined.
+PROJECT_SQL=$(agmsg_sql_escape "$PROJECT_PATH")
+AGENT_TYPE_SQL=$(agmsg_sql_escape "$AGENT_TYPE")
 
 [ -d "$TEAMS_DIR" ] || exit 0
 
@@ -35,7 +37,7 @@ for config_file in "$TEAMS_DIR"/*/config.json; do
   ")
   [ -z "$TEAM_NAME" ] && continue
   [ "$TEAM_NAME" = "null" ] && continue
-  TEAM_SQL=$(printf '%s' "$TEAM_NAME" | sed "s/'/''/g")
+  TEAM_SQL=$(agmsg_sql_escape "$TEAM_NAME")
 
   sqlite3 -separator $'\t' :memory: "
     WITH raw(json) AS (SELECT CAST(readfile('$cfg_sql') AS TEXT)),

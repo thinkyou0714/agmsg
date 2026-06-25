@@ -6,7 +6,9 @@
 
 : "${SKILL_DIR:?subscription.sh requires SKILL_DIR}"
 
-agmsg_sql_escape() { printf '%s' "$1" | sed "s/'/''/g"; }
+# agmsg_sql_escape is defined in storage.sh; source it if a caller has not
+# already (watch-once.sh sources storage.sh first, but stay self-contained).
+command -v agmsg_sql_escape >/dev/null 2>&1 || . "$SKILL_DIR/scripts/lib/storage.sh"
 
 # Resolve the (team, agent) rows this process should receive for.
 #

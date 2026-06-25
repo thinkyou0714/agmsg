@@ -25,7 +25,7 @@ if [ ! -f "$TEAM_CONFIG" ]; then
   exit 1
 fi
 
-CONFIG_ESCAPED=$(sed "s/'/''/g" "$TEAM_CONFIG")
+CONFIG_ESCAPED=$(agmsg_sql_escape "$(cat "$TEAM_CONFIG")")
 
 # Check if agent exists
 EXISTS=$(agmsg_sqlite_mem ".param set :json '$CONFIG_ESCAPED'" \
@@ -41,7 +41,7 @@ UPDATED=$(agmsg_sqlite_mem ".param set :json '$CONFIG_ESCAPED'" \
 
 # Check if agents is now empty
 AGENT_COUNT=$(agmsg_sqlite_mem \
-  "SELECT count(*) FROM json_each(json_extract('$(echo "$UPDATED" | sed "s/'/''/g")', '$.agents'));")
+  "SELECT count(*) FROM json_each(json_extract('$(agmsg_sql_escape "$UPDATED")', '$.agents'));")
 
 if [ "$AGENT_COUNT" -eq 0 ]; then
   rm -f "$TEAM_CONFIG"

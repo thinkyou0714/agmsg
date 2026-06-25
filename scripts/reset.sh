@@ -63,7 +63,7 @@ for TEAM_CONFIG in "$TEAMS_DIR"/*/config.json; do
   [ -f "$TEAM_CONFIG" ] || continue
   TEAM_DIR="$(dirname "$TEAM_CONFIG")"
   TEAM_NAME="$(basename "$TEAM_DIR")"
-  CONFIG_ESCAPED=$(sed "s/'/''/g" "$TEAM_CONFIG")
+  CONFIG_ESCAPED=$(agmsg_sql_escape "$(cat "$TEAM_CONFIG")")
 
   AGENT_JSON=$(agmsg_sqlite_mem ".param set :json '$CONFIG_ESCAPED'" \
     "SELECT json_extract(:json, '$.agents.$TARGET_AGENT');")
@@ -71,7 +71,7 @@ for TEAM_CONFIG in "$TEAMS_DIR"/*/config.json; do
     continue
   fi
 
-  AGENT_ESCAPED=$(printf '%s' "$AGENT_JSON" | sed "s/'/''/g")
+  AGENT_ESCAPED=$(agmsg_sql_escape "$AGENT_JSON")
   NORMALIZED=$(agmsg_sqlite_mem "
     WITH agent(a) AS (SELECT '$AGENT_ESCAPED')
     SELECT CASE
@@ -86,7 +86,7 @@ for TEAM_CONFIG in "$TEAMS_DIR"/*/config.json; do
     END
     FROM agent;
   ")
-  NORMALIZED_ESCAPED=$(printf '%s' "$NORMALIZED" | sed "s/'/''/g")
+  NORMALIZED_ESCAPED=$(agmsg_sql_escape "$NORMALIZED")
 
   MATCH_COUNT=$(agmsg_sqlite_mem "
     SELECT count(*)
@@ -111,7 +111,7 @@ for TEAM_CONFIG in "$TEAMS_DIR"/*/config.json; do
       ), json('[]'))
     );
   ")
-  FILTERED_ESCAPED=$(printf '%s' "$FILTERED" | sed "s/'/''/g")
+  FILTERED_ESCAPED=$(agmsg_sql_escape "$FILTERED")
   REMAINING=$(agmsg_sqlite_mem "
     SELECT json_array_length(json_extract('$FILTERED_ESCAPED', '\$.registrations'));
   ")
@@ -126,7 +126,7 @@ for TEAM_CONFIG in "$TEAMS_DIR"/*/config.json; do
 
   AGENT_COUNT=$(agmsg_sqlite_mem "
     SELECT count(*)
-    FROM json_each(json_extract('$(printf '%s' "$UPDATED" | sed "s/'/''/g")', '\$.agents'));
+    FROM json_each(json_extract('$(agmsg_sql_escape "$UPDATED")', '\$.agents'));
   ")
 
   if [ "$AGENT_COUNT" -eq 0 ]; then

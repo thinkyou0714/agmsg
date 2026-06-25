@@ -52,6 +52,16 @@ function die(message) {
   process.exit(1);
 }
 
+// Numeric option guards — `die` with a consistent message instead of repeating
+// the Number.isFinite check at every flag in parseArgs.
+function requirePositive(value, flag) {
+  if (!Number.isFinite(value) || value <= 0) die(`${flag} must be a positive number`);
+}
+
+function requireNonNegative(value, flag) {
+  if (!Number.isFinite(value) || value < 0) die(`${flag} must be a non-negative number`);
+}
+
 function parseArgs(argv) {
   const opts = {
     type: "codex",
@@ -102,15 +112,11 @@ function parseArgs(argv) {
 
   if (opts.help) return opts;
   if (!opts.project) die("--project is required");
-  if (!Number.isFinite(opts.timeout) || opts.timeout <= 0) die("--timeout must be a positive number");
-  if (!Number.isFinite(opts.interval) || opts.interval <= 0) die("--interval must be a positive number");
-  if (!Number.isFinite(opts.maxWakes) || opts.maxWakes < 0) die("--max-wakes must be a non-negative number");
-  if (!Number.isFinite(opts.staleWakeLimit) || opts.staleWakeLimit < 0) {
-    die("--stale-wake-limit must be a non-negative number");
-  }
-  if (!Number.isFinite(opts.turnTimeout) || opts.turnTimeout < 0) {
-    die("--turn-timeout must be a non-negative number");
-  }
+  requirePositive(opts.timeout, "--timeout");
+  requirePositive(opts.interval, "--interval");
+  requireNonNegative(opts.maxWakes, "--max-wakes");
+  requireNonNegative(opts.staleWakeLimit, "--stale-wake-limit");
+  requireNonNegative(opts.turnTimeout, "--turn-timeout");
   if (opts.threadId === "current") {
     opts.threadId = process.env.CODEX_THREAD_ID || "";
     if (!opts.threadId) die("--thread current requires CODEX_THREAD_ID");
@@ -164,57 +170,30 @@ function resolveIdentity(opts) {
   return deduped[0];
 }
 
-class AppServerClient {
-  constructor(command, cwd) {
-    this.command = command;
-    this.cwd = cwd;
+// Shared JSON-RPC 2.0 framing for both app-server transports (the stdio child
+// and the WebSocket client). Owns the request-id counter, the pending-request
+// table, and the notification handler registry. Subclasses implement only how a
+// serialized message is written (`_send`) plus their own connection lifecycle.
+class JsonRpcEndpoint {
+  constructor() {
     this.nextId = 1;
     this.pending = new Map();
     this.handlers = new Map();
-    this.child = null;
-  }
-
-  start() {
-    const [bin, ...args] = this.command;
-    this.child = spawn(bin, args, {
-      cwd: this.cwd,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    this.child.on("error", (error) => {
-      for (const { reject } of this.pending.values()) {
-        reject(error);
-      }
-      this.pending.clear();
-      console.error(`codex-bridge: failed to start app-server: ${error.message}`);
-    });
-
-    this.child.on("exit", (code, signal) => {
-      for (const { reject } of this.pending.values()) {
-        reject(new Error(`app-server exited (${code || signal})`));
-      }
-      this.pending.clear();
-    });
-
-    this.child.stderr.on("data", (chunk) => {
-      process.stderr.write(chunk);
-    });
-
-    const lines = readline.createInterface({ input: this.child.stdout });
-    lines.on("line", (line) => this.handleLine(line));
   }
 
   on(method, handler) {
     this.handlers.set(method, handler);
   }
 
+  // Decode one line/frame of JSON-RPC: settle the matching pending request by
+  // id, or dispatch a notification to a registered handler.
   handleLine(line) {
     if (!line.trim()) return;
     let message;
     try {
       message = JSON.parse(line);
     } catch (error) {
-      console.error(`codex-bridge: ignoring non-json app-server line: ${line}`);
+      console.error(`codex-bridge: ignoring non-json app-server message: ${line}`);
       return;
     }
 
@@ -240,7 +219,7 @@ class AppServerClient {
     const payload = { jsonrpc: "2.0", id, method, params };
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
-      this.child.stdin.write(`${JSON.stringify(payload)}\n`, (error) => {
+      this._send(payload, (error) => {
         if (error) {
           this.pending.delete(id);
           reject(error);
@@ -250,7 +229,59 @@ class AppServerClient {
   }
 
   notify(method, params = {}) {
-    this.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`);
+    this._send({ jsonrpc: "2.0", method, params });
+  }
+
+  // Reject and clear every in-flight request — called when the transport dies.
+  rejectAll(error) {
+    for (const { reject } of this.pending.values()) {
+      reject(error);
+    }
+    this.pending.clear();
+  }
+
+  // Serialize and write `payload`, invoking callback(err) on completion/failure.
+  // Subclasses must override.
+  _send(_payload, _callback) {
+    throw new Error("JsonRpcEndpoint subclass must implement _send");
+  }
+}
+
+// stdio transport: a spawned `codex app-server` child, one JSON message per line.
+class AppServerClient extends JsonRpcEndpoint {
+  constructor(command, cwd) {
+    super();
+    this.command = command;
+    this.cwd = cwd;
+    this.child = null;
+  }
+
+  start() {
+    const [bin, ...args] = this.command;
+    this.child = spawn(bin, args, {
+      cwd: this.cwd,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    this.child.on("error", (error) => {
+      this.rejectAll(error);
+      console.error(`codex-bridge: failed to start app-server: ${error.message}`);
+    });
+
+    this.child.on("exit", (code, signal) => {
+      this.rejectAll(new Error(`app-server exited (${code || signal})`));
+    });
+
+    this.child.stderr.on("data", (chunk) => {
+      process.stderr.write(chunk);
+    });
+
+    const lines = readline.createInterface({ input: this.child.stdout });
+    lines.on("line", (line) => this.handleLine(line));
+  }
+
+  _send(payload, callback = () => {}) {
+    this.child.stdin.write(`${JSON.stringify(payload)}\n`, callback);
   }
 
   stop() {
@@ -265,13 +296,11 @@ class AppServerClient {
 // `--app-server unix://…`, or a TCP host/port ({ host, port }) for
 // `--app-server ws://host:port` (codex 0.141+ accepts only ws:// for `--remote`,
 // see #170).
-class WebSocketAppServerClient {
+class WebSocketAppServerClient extends JsonRpcEndpoint {
   constructor(connectOptions, label) {
+    super();
     this.connectOptions = connectOptions;
     this.label = label || "app-server";
-    this.nextId = 1;
-    this.pending = new Map();
-    this.handlers = new Map();
     this.socket = null;
     this.buffer = Buffer.alloc(0);
     this.connected = false;
@@ -316,10 +345,6 @@ class WebSocketAppServerClient {
 
   async ready() {
     if (this.startPromise) await this.startPromise;
-  }
-
-  on(method, handler) {
-    this.handlers.set(method, handler);
   }
 
   handleData(chunk, resolveStart, rejectStart) {
@@ -409,50 +434,7 @@ class WebSocketAppServerClient {
     }
   }
 
-  handleLine(line) {
-    if (!line.trim()) return;
-    let message;
-    try {
-      message = JSON.parse(line);
-    } catch (_) {
-      console.error(`codex-bridge: ignoring non-json app-server message: ${line}`);
-      return;
-    }
-    if (Object.prototype.hasOwnProperty.call(message, "id")) {
-      const pending = this.pending.get(message.id);
-      if (!pending) return;
-      this.pending.delete(message.id);
-      if (message.error) {
-        pending.reject(new Error(message.error.message || JSON.stringify(message.error)));
-      } else {
-        pending.resolve(message.result);
-      }
-      return;
-    }
-    if (message.method && this.handlers.has(message.method)) {
-      this.handlers.get(message.method)(message.params || {});
-    }
-  }
-
-  request(method, params) {
-    const id = this.nextId++;
-    const payload = { jsonrpc: "2.0", id, method, params };
-    return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.sendJson(payload, (error) => {
-        if (error) {
-          this.pending.delete(id);
-          reject(error);
-        }
-      });
-    });
-  }
-
-  notify(method, params = {}) {
-    this.sendJson({ jsonrpc: "2.0", method, params });
-  }
-
-  sendJson(value, callback = () => {}) {
+  _send(value, callback = () => {}) {
     if (!this.connected) {
       callback(new Error("app-server websocket is not connected"));
       return;
@@ -483,13 +465,6 @@ class WebSocketAppServerClient {
       frame[headerLength + 4 + i] = payload[i] ^ mask[i % 4];
     }
     this.socket.write(frame, callback);
-  }
-
-  rejectAll(error) {
-    for (const { reject } of this.pending.values()) {
-      reject(error);
-    }
-    this.pending.clear();
   }
 
   stop() {
