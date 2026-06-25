@@ -93,6 +93,16 @@ agmsg_sqlite_mem() {
   sqlite3 :memory: "$@" | tr -d '\r'
 }
 
+# Escape a string for safe interpolation into a single-quoted SQL string literal
+# by doubling embedded single quotes. Centralizes the `s/'/''/g` idiom that was
+# previously copy-pasted across nearly every DB-backed script (and redefined as a
+# local `sql_escape`/`agmsg_sql_escape` in a couple of helpers). Uses
+# printf '%s' rather than echo so a value like "-n" or one containing
+# backslashes is escaped verbatim instead of being mangled by echo.
+agmsg_sql_escape() {
+  printf '%s' "$1" | sed "s/'/''/g"
+}
+
 # Turn a filesystem path into a form sqlite3's readfile() can open, then escape
 # it as a SQL string literal. On Windows, sqlite3.exe is a native binary that
 # can't open a Git Bash path like /d/a/agmsg/x.json — readfile() returns NULL
@@ -104,5 +114,5 @@ agmsg_sql_readfile_path() {
   if command -v cygpath >/dev/null 2>&1; then
     path=$(cygpath -w "$path" 2>/dev/null || printf '%s' "$path")
   fi
-  printf '%s' "$path" | sed "s/'/''/g"
+  agmsg_sql_escape "$path"
 }

@@ -25,7 +25,7 @@ if [ ! -f "$TEAM_CONFIG" ]; then
 fi
 
 # --- Update team config ---
-CONFIG_ESCAPED=$(sed "s/'/''/g" "$TEAM_CONFIG")
+CONFIG_ESCAPED=$(agmsg_sql_escape "$(cat "$TEAM_CONFIG")")
 
 # Check old exists
 OLD_VAL=$(agmsg_sqlite_mem ".param set :json '$CONFIG_ESCAPED'" \

@@ -16,6 +16,8 @@ source "$SCRIPT_DIR/lib/actas-lock.sh"
 source "$SCRIPT_DIR/lib/resolve-project.sh"  # agmsg_agent_pid, for instance-id derivation
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/type-registry.sh"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/hook-input.sh"
 
 # Some Stop-hook runtimes (codex, copilot) want an explicit JSON status object
 # even when there is nothing to deliver; others (claude-code) stay silent. This
@@ -42,9 +44,7 @@ fi
 # Defer to the monitor watcher when one is alive for this session.
 # Avoids double-delivery when delivery.mode = both. session_id is sent in
 # the hook input JSON for Stop events.
-SESSION_ID=$(printf '%s' "$INPUT" \
-  | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
-  | head -1)
+SESSION_ID=$(agmsg_hook_json_field "$INPUT" session_id)
 if [ -n "$SESSION_ID" ]; then
   # The monitor watcher keys its pidfile (and its actas owner, below) on the
   # per-process instance id (#93), not the bare session_id. Normalize to the

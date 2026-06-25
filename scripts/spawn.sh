@@ -58,6 +58,8 @@ source "$SCRIPT_DIR/lib/actas-lock.sh"
 source "$SCRIPT_DIR/lib/type-registry.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/storage.sh"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/node.sh"
 
 die() { echo "spawn: $*" >&2; exit 1; }
 
@@ -161,8 +163,13 @@ fi
 # Resolve the node launcher path from the manifest (not hardcoded), if any.
 SPAWN_AGENT=""
 if [ -n "$SPAWN_LAUNCHER" ]; then
-  NODE_BIN="${AGMSG_NODE_BIN:-$(command -v node 2>/dev/null || true)}"
-  [ -n "$NODE_BIN" ] || die "'node' not found on PATH — spawning '$AGENT_TYPE' requires Node.js"
+  # Resolve Node the same way the codex bridge does (lib/node.sh) so a
+  # version-manager Node (nvm/fnm/volta) missing from a non-interactive PATH is
+  # still found. AGMSG_NODE_BIN remains an explicit override for back-compat;
+  # the executable check preserves the early, clear failure when no Node exists.
+  NODE_BIN="${AGMSG_NODE_BIN:-$(agmsg_resolve_node)}"
+  command -v "$NODE_BIN" >/dev/null 2>&1 || [ -x "$NODE_BIN" ] \
+    || die "'node' not found on PATH — spawning '$AGENT_TYPE' requires Node.js"
   type_dir="$(agmsg_type_dir "$AGENT_TYPE")" \
     || die "agent type '$AGENT_TYPE' is not registered (no scripts/drivers/types/$AGENT_TYPE/type.conf)"
   SPAWN_AGENT="$type_dir/$SPAWN_LAUNCHER"
@@ -180,10 +187,10 @@ resolve_team() {
   # than `.param set` bindings: the sqlite3 shell's dot-command tokenizer does
   # NOT honour SQL '' escaping, so a value containing a single quote (a project
   # path like /tmp/pro'j) breaks `.param set`. SQL string literals do honour ''.
-  proj_sql=$(printf '%s' "$PROJECT" | sed "s/'/''/g")
+  proj_sql=$(agmsg_sql_escape "$PROJECT")
   for config_file in "$TEAMS_DIR"/*/config.json; do
     [ -f "$config_file" ] || continue
-    cfg_sql=$(printf '%s' "$config_file" | sed "s/'/''/g")
+    cfg_sql=$(agmsg_sql_escape "$config_file")
     team_name=$(agmsg_sqlite_mem \
       "SELECT json_extract(CAST(readfile('$cfg_sql') AS TEXT), '\$.name');")
     # Does any agent in this team have a registration for PROJECT (any type)?

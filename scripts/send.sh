@@ -14,7 +14,7 @@ DB="$(agmsg_db_path)"
 
 [ -f "$DB" ] || bash "$SCRIPT_DIR/internal/init-db.sh" >/dev/null
 
-INSERT="INSERT INTO messages (team, from_agent, to_agent, body) VALUES ('$TEAM', '$FROM', '$TO', '$(echo "$BODY" | sed "s/'/''/g")');"
+INSERT="INSERT INTO messages (team, from_agent, to_agent, body) VALUES ('$TEAM', '$FROM', '$TO', '$(agmsg_sql_escape "$BODY")');"
 
 # Retry once after ensuring the schema. Under a concurrent first-write fan-out
 # (leader → N members against a fresh/override store), one process can see the
