@@ -22,9 +22,13 @@ INSERT="INSERT INTO messages (team, from_agent, to_agent, body) VALUES ('$TEAM',
 # so its INSERT would hit "no such table". init-db.sh is idempotent + uses the
 # busy_timeout, so re-running it waits for the schema, then the INSERT lands.
 # See #114.
-if ! agmsg_sqlite "$DB" "$INSERT" 2>/dev/null; then
+# Pipe the SQL via stdin (not as an argv) so a large body cannot overflow the
+# OS command-line limit (the "Argument list too long" crash).
+if ! printf '%s
+' "$INSERT" | agmsg_sqlite "$DB" 2>/dev/null; then
   bash "$SCRIPT_DIR/internal/init-db.sh" >/dev/null
-  agmsg_sqlite "$DB" "$INSERT"
+  printf '%s
+' "$INSERT" | agmsg_sqlite "$DB"
 fi
 
 echo "Sent to $TO in team $TEAM"
