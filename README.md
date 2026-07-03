@@ -525,3 +525,13 @@ If agmsg saves you copy-paste round-trips, a GitHub star helps other people find
 ## License
 
 MIT
+
+## Claude Code で使う (web / cloud 対応)
+
+このリポジトリは **Claude Code on the web** に対応しています。
+
+- ランタイム依存なし（Bash + SQLite + zero-dep Node CLI）。`.claude/bootstrap.sh`（SessionStart）は実質 no-op。`sqlite3` は web sandbox にプリインストール。
+- クラウドセッションは `AGENTS.md` と `.claude/skills/`（例: `run-tests` = bats）を自動ロード。
+- メッセージストアはローカル SQLite。クラウドはコードの読み書き・テスト用。
+- MCP は本リポジトリではローカル専用。詳細は
+  [`.github/docs/claude-code-web-readiness.md`](https://github.com/thinkyou0714/.github/blob/main/docs/claude-code-web-readiness.md)。
