@@ -31,6 +31,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # Cheap gate: is this PR's diff entirely documentation? Pushes to main always
   # run the full suite (docs_only=false) — main must stay fully verified.

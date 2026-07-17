@@ -21,8 +21,11 @@ on:
       - 'v*.*.*'
 
 permissions:
-  contents: write  # for creating the GitHub Release
-  id-token: write  # for npm publish --provenance (OIDC attestation)
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -31,6 +34,9 @@ jobs:
     # reviewer (configured in repo Settings → Environments). A pushed tag
     # won't ship to npm until a human approves the deployment.
     environment: production
+    permissions:
+      contents: write  # for creating the GitHub Release
+      id-token: write  # for npm publish --provenance (OIDC attestation)
     steps:
       - name: Checkout
         uses: actions/checkout@v4
